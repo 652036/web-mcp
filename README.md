@@ -6,8 +6,8 @@ Forkcast turns a browser page into a shared decision workspace. An agent can fra
 
 > Decision intelligence, not decision replacement.
 
-[![CI](https://github.com/652036/web-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/652036/web-mcp/actions/workflows/ci.yml)
-[![Deploy](https://github.com/652036/web-mcp/actions/workflows/pages.yml/badge.svg)](https://github.com/652036/web-mcp/actions/workflows/pages.yml)
+[![CI](https://github.com/652036/forkcast/actions/workflows/ci.yml/badge.svg)](https://github.com/652036/forkcast/actions/workflows/ci.yml)
+[![Deploy](https://github.com/652036/forkcast/actions/workflows/pages.yml/badge.svg)](https://github.com/652036/forkcast/actions/workflows/pages.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-7768d8.svg)](LICENSE)
 
 <p align="center">
@@ -108,8 +108,8 @@ More detail is available in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 Forkcast has no package dependencies. Node is used only for the local server, validation, and tests.
 
 ```bash
-git clone https://github.com/652036/web-mcp.git
-cd web-mcp
+git clone https://github.com/652036/forkcast.git
+cd forkcast
 npm ci
 npm run dev
 ```
@@ -160,7 +160,7 @@ See [`SECURITY.md`](SECURITY.md) for the trust boundaries.
 
 The repository includes a GitHub Pages workflow. Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions** once. Every later push to `main` verifies and deploys the static site.
 
-Expected Pages URL after enablement: `https://652036.github.io/web-mcp/`
+Expected Pages URL after enablement: `https://652036.github.io/forkcast/`
 
 ## Challenge materials
 
