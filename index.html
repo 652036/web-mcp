@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Forkcast is an inspectable human–agent decision studio built for WebMCP.">
+  <meta name="theme-color" content="#252431">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';">
+  <title>Forkcast — Human–Agent Decision Studio</title>
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="src/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to decision workspace</a>
+
+  <header class="site-header">
+    <a class="brand" href="#main-content" aria-label="Forkcast home">
+      <img src="assets/icon.svg" width="40" height="40" alt="">
+      <span>
+        <strong>Forkcast</strong>
+        <small>Human–agent decision studio</small>
+      </span>
+    </a>
+
+    <div class="header-center" aria-live="polite">
+      <span class="workspace-kicker">Current workspace</span>
+      <strong id="workspace-title">Launch Atlas Notes</strong>
+      <span id="workspace-status" class="status-pill" data-state="active">In progress</span>
+    </div>
+
+    <nav class="header-actions" aria-label="Workspace actions">
+      <label class="select-shell select-shell--compact">
+        <span class="sr-only">Load example</span>
+        <select id="example-select">
+          <option value="">Examples</option>
+          <option value="launch">Product launch</option>
+          <option value="location">APAC support hub</option>
+        </select>
+      </label>
+      <button id="undo-button" class="button button--ghost" type="button" data-action="undo">Undo</button>
+      <button class="button button--ghost" type="button" data-action="export">Export</button>
+      <button class="button button--ink" type="button" data-action="open-tool-lab">Tool Lab</button>
+      <button class="theme-toggle" type="button" data-action="toggle-theme" aria-label="Toggle color theme" title="Toggle theme">
+        <span aria-hidden="true">◐</span>
+      </button>
+    </nav>
+  </header>
+
+  <main id="main-content" class="page-shell">
+    <section id="section-brief" class="hero-grid section-anchor" aria-labelledby="decision-question">
+      <article class="brief-card surface surface--hero">
+        <div class="section-heading section-heading--hero">
+          <div>
+            <span class="eyebrow">Decision brief</span>
+            <h1 id="decision-question">Which launch motion should the team use?</h1>
+          </div>
+          <button class="button button--ghost" type="button" data-action="edit-brief">Edit brief</button>
+        </div>
+        <div class="brief-columns">
+          <div>
+            <span class="micro-label">Context</span>
+            <p id="decision-context"></p>
+          </div>
+          <div>
+            <span class="micro-label">Constraints</span>
+            <p id="decision-constraints"></p>
+          </div>
+        </div>
+        <div class="brief-footer">
+          <div class="metric"><strong id="option-count">3</strong><span>options</span></div>
+          <div class="metric"><strong id="criterion-count">4</strong><span>criteria</span></div>
+          <div class="metric metric--attention"><strong id="gap-count">0</strong><span>evidence gaps</span></div>
+          <button class="button button--primary" type="button" data-action="add-option">Add option</button>
+          <button class="button button--ghost" type="button" data-action="reset-workspace">New decision</button>
+        </div>
+      </article>
+
+      <aside class="surface agent-card" aria-labelledby="agent-card-title">
+        <div id="webmcp-status" class="connection-badge" data-mode="preview">
+          <span class="connection-dot" aria-hidden="true"></span>
+          <div><strong>Tool Lab preview</strong><span>0 tools</span></div>
+        </div>
+        <span class="eyebrow">Shared control</span>
+        <h2 id="agent-card-title">The agent works in the page. You keep the decision.</h2>
+        <p>Every agent action updates the same visible evidence, scenarios, and assumptions you can inspect and undo.</p>
+        <div class="boundary-note">
+          <span aria-hidden="true">⌁</span>
+          <p><strong>Human-only boundary</strong>No WebMCP tool can commit the final recommendation.</p>
+        </div>
+      </aside>
+    </section>
+
+    <section class="workspace-grid" aria-label="Decision workspace">
+      <div class="workspace-main">
+        <section id="section-ranking" class="surface section-card section-anchor" aria-labelledby="ranking-title">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">Live synthesis</span>
+              <h2 id="ranking-title">Ranked options</h2>
+            </div>
+            <span class="section-note">Weighted score · 0–10</span>
+          </div>
+          <div id="ranking-list" class="ranking-list"></div>
+        </section>
+
+        <section id="section-matrix" class="surface section-card section-anchor" aria-labelledby="matrix-title">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">Inspectable reasoning</span>
+              <h2 id="matrix-title">Evidence matrix</h2>
+            </div>
+            <span class="legend"><i></i> Needs evidence</span>
+          </div>
+          <div class="table-scroll">
+            <table id="evidence-matrix" class="matrix-table"></table>
+          </div>
+        </section>
+
+        <section id="section-gate" class="surface section-card decision-gate section-anchor" aria-labelledby="gate-title">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">Human control point</span>
+              <h2 id="gate-title">Decision gate</h2>
+            </div>
+            <span class="human-only-chip">Human only</span>
+          </div>
+          <div class="gate-grid">
+            <form id="recommendation-form" class="stack-form">
+              <label>
+                <span>Recommended option</span>
+                <select id="recommendation-option" name="optionId" required></select>
+              </label>
+              <label>
+                <span>Rationale</span>
+                <textarea id="recommendation-rationale" name="rationale" rows="5" maxlength="4000" placeholder="Explain why this option leads, what remains uncertain, and what must be true." required></textarea>
+              </label>
+              <button id="stage-recommendation-button" class="button button--ink" type="submit">Stage recommendation</button>
+              <p class="form-help">Agents can stage here through WebMCP. Commitment is deliberately unavailable as a tool.</p>
+            </form>
+            <div id="staged-review" class="staged-review" aria-live="polite"></div>
+          </div>
+        </section>
+      </div>
+
+      <aside class="workspace-sidebar" aria-label="Decision controls">
+        <section class="surface section-card" aria-labelledby="options-title">
+          <div class="section-heading section-heading--compact">
+            <div><span class="eyebrow">Alternatives</span><h2 id="options-title">Option set</h2></div>
+            <button class="icon-add" type="button" data-action="add-option" aria-label="Add option">+</button>
+          </div>
+          <div id="option-list" class="option-list"></div>
+        </section>
+
+        <section class="surface section-card" aria-labelledby="criteria-title">
+          <div class="section-heading section-heading--compact">
+            <div><span class="eyebrow">Values</span><h2 id="criteria-title">Criteria weights</h2></div>
+            <button class="icon-add" type="button" data-action="add-criterion" aria-label="Add criterion">+</button>
+          </div>
+          <div id="criteria-list" class="criteria-list"></div>
+          <p id="scenario-weight-note" class="form-help"></p>
+        </section>
+
+        <section id="section-scenarios" class="surface section-card section-anchor" aria-labelledby="scenario-title">
+          <div class="section-heading section-heading--compact">
+            <div><span class="eyebrow">What-if futures</span><h2 id="scenario-title">Scenario</h2></div>
+            <button class="icon-add" type="button" data-action="add-scenario" aria-label="Add scenario">+</button>
+          </div>
+          <label class="select-shell">
+            <span class="sr-only">Active scenario</span>
+            <select id="scenario-select"></select>
+          </label>
+          <p id="scenario-description" class="scenario-copy"></p>
+        </section>
+
+        <section id="section-assumptions" class="surface section-card section-anchor" aria-labelledby="assumption-title">
+          <div class="section-heading section-heading--compact">
+            <div><span class="eyebrow">Unknowns</span><h2 id="assumption-title">Assumptions</h2></div>
+            <button class="icon-add" type="button" data-action="add-assumption" aria-label="Add assumption">+</button>
+          </div>
+          <div id="assumption-list" class="assumption-list"></div>
+        </section>
+
+        <section id="section-stress" class="surface section-card section-anchor" aria-labelledby="stress-title">
+          <div class="section-heading section-heading--compact">
+            <div><span class="eyebrow">Uncertainty</span><h2 id="stress-title">Stress test</h2></div>
+            <button class="button button--ghost button--small" type="button" data-action="run-stress">Run 2k</button>
+          </div>
+          <div id="stress-results" class="stress-results"></div>
+          <p id="stress-meta" class="form-help"></p>
+        </section>
+
+        <section id="section-activity" class="surface section-card section-anchor" aria-labelledby="activity-title">
+          <div class="section-heading section-heading--compact">
+            <div><span class="eyebrow">Audit trail</span><h2 id="activity-title">Recent activity</h2></div>
+          </div>
+          <ol id="activity-list" class="activity-list"></ol>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p><strong>Forkcast</strong> turns agent actions into visible, reversible decision work.</p>
+    <p>Local-first · No backend · No analytics</p>
+  </footer>
+
+  <dialog id="brief-dialog" class="dialog">
+    <form id="brief-form" class="dialog-card">
+      <div class="dialog-heading"><div><span class="eyebrow">Decision frame</span><h2>Edit brief</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
+      <label><span>Title</span><input id="brief-title-input" name="title" maxlength="120" required></label>
+      <label><span>Decision question</span><textarea id="brief-question-input" name="question" rows="2" maxlength="300" required></textarea></label>
+      <label><span>Context</span><textarea id="brief-context-input" name="context" rows="4" maxlength="4000"></textarea></label>
+      <label><span>Constraints</span><textarea id="brief-constraints-input" name="constraints" rows="4" maxlength="4000"></textarea></label>
+      <div class="dialog-actions"><button class="button button--primary" type="submit">Save brief</button><button class="button button--ghost" type="button" data-action="close-dialog">Cancel</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="option-dialog" class="dialog">
+    <form id="option-form" class="dialog-card">
+      <div class="dialog-heading"><div><span class="eyebrow">Alternative</span><h2 id="option-dialog-title">Add option</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
+      <input id="option-id-input" name="id" type="hidden">
+      <label><span>Name</span><input id="option-name-input" name="name" maxlength="160" required></label>
+      <label><span>Description</span><textarea id="option-description-input" name="description" rows="4" maxlength="1000"></textarea></label>
+      <div class="dialog-actions dialog-actions--spread"><button id="remove-option-button" class="button button--danger" type="button">Remove</button><span></span><button class="button button--primary" type="submit">Save option</button><button class="button button--ghost" type="button" data-action="close-dialog">Cancel</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="score-dialog" class="dialog">
+    <form id="score-form" class="dialog-card">
+      <div class="dialog-heading"><div><span class="eyebrow">Evidence cell</span><h2 id="score-dialog-title">Score option</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
+      <input id="score-option-id" name="optionId" type="hidden">
+      <input id="score-criterion-id" name="criterionId" type="hidden">
+      <p id="score-scenario-note" class="dialog-note"></p>
+      <label class="range-label"><span>Score <output id="score-value">5.0</output></span><input id="score-input" name="score" type="range" min="0" max="10" step="0.1" value="5"></label>
+      <label class="range-label"><span>Confidence <output id="confidence-value">50%</output></span><input id="confidence-input" name="confidence" type="range" min="0" max="100" step="1" value="50"></label>
+      <label><span>Evidence note</span><textarea id="evidence-input" name="evidence" rows="5" maxlength="2000" placeholder="Record the source, observation, or reasoning behind this score."></textarea></label>
+      <div class="dialog-actions"><button class="button button--primary" type="submit">Save evidence</button><button class="button button--ghost" type="button" data-action="close-dialog">Cancel</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="criterion-dialog" class="dialog">
+    <form id="criterion-form" class="dialog-card">
+      <div class="dialog-heading"><div><span class="eyebrow">Decision value</span><h2>Add criterion</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
+      <label><span>Name</span><input name="name" maxlength="160" required></label>
+      <label><span>Description</span><textarea name="description" rows="3" maxlength="1000"></textarea></label>
+      <label><span>Raw weight</span><input id="criterion-weight-input" name="weight" type="number" min="0" max="1000" step="1" value="20" required></label>
+      <p class="form-help">Raw weights are normalized automatically, so they do not need to sum to 100.</p>
+      <div class="dialog-actions"><button class="button button--primary" type="submit">Add criterion</button><button class="button button--ghost" type="button" data-action="close-dialog">Cancel</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="assumption-dialog" class="dialog">
+    <form id="assumption-form" class="dialog-card">
+      <div class="dialog-heading"><div><span class="eyebrow">Unknown</span><h2>Add assumption</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
+      <label><span>Assumption</span><textarea name="text" rows="4" maxlength="4000" required></textarea></label>
+      <label><span>Impact if wrong</span><select name="impact"><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label>
+      <div class="dialog-actions"><button class="button button--primary" type="submit">Add assumption</button><button class="button button--ghost" type="button" data-action="close-dialog">Cancel</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="scenario-dialog" class="dialog">
+    <form id="scenario-form" class="dialog-card">
+      <div class="dialog-heading"><div><span class="eyebrow">What-if future</span><h2>Create scenario</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
+      <label><span>Name</span><input name="name" maxlength="160" required></label>
+      <label><span>Description</span><textarea name="description" rows="4" maxlength="2000"></textarea></label>
+      <p class="form-help">After creation, adjust criterion weights and matrix cells while the scenario is active. Base-case values remain intact.</p>
+      <div class="dialog-actions"><button class="button button--primary" type="submit">Create scenario</button><button class="button button--ghost" type="button" data-action="close-dialog">Cancel</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="tool-dialog" class="dialog dialog--wide">
+    <div class="dialog-card tool-lab">
+      <div class="dialog-heading"><div><span class="eyebrow">Browser-agent interface</span><h2>WebMCP Tool Lab</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
+      <p class="dialog-note">This preview invokes the same tool definitions and handlers registered with the browser's native WebMCP API.</p>
+      <div class="tool-grid">
+        <form id="tool-form" class="tool-panel">
+          <label><span>Tool</span><select id="tool-select"></select></label>
+          <p id="tool-description" class="tool-description"></p>
+          <label><span>JSON input</span><textarea id="tool-input" rows="12" spellcheck="false">{}</textarea></label>
+          <button class="button button--primary" type="submit">Run tool</button>
+        </form>
+        <div class="tool-panel">
+          <span class="field-label">Input schema</span>
+          <pre id="tool-schema" class="code-box"></pre>
+          <span class="field-label">Result</span>
+          <pre id="tool-output" class="code-box code-box--result">Select a tool and run it.</pre>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="false"></div>
+</body>
+</html>

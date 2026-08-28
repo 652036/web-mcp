@@ -1,0 +1,18 @@
+{
+  "name": "Forkcast — Human–Agent Decision Studio",
+  "short_name": "Forkcast",
+  "description": "An inspectable decision workspace where people and browser agents collaborate without surrendering final control.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f4ef",
+  "theme_color": "#252431",
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

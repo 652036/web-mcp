@@ -1,0 +1,18 @@
+{
+  "name": "forkcast-webmcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A human-agent decision studio built for WebMCP.",
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node scripts/verify.mjs",
+    "verify": "npm run check && npm test",
+    "build": "node scripts/build.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT"
+}

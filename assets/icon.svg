@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Forkcast logo</title>
+  <desc id="desc">Three decision paths converging into a compass point.</desc>
+  <rect width="128" height="128" rx="28" fill="#252431"/>
+  <path d="M28 31h18c18 0 29 10 29 28v38" fill="none" stroke="#f6b94a" stroke-width="11" stroke-linecap="round"/>
+  <path d="M100 31H82c-18 0-29 10-29 28v38" fill="none" stroke="#7dd3c7" stroke-width="11" stroke-linecap="round"/>
+  <path d="M64 23v76" fill="none" stroke="#f4f4ef" stroke-width="11" stroke-linecap="round"/>
+  <path d="m46 91 18 19 18-19" fill="#f4f4ef"/>
+</svg>

@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 810" role="img" aria-labelledby="title desc">
+  <title id="title">Forkcast decision studio overview</title>
+  <desc id="desc">A stylized Forkcast dashboard showing ranked options, an evidence matrix, scenarios, and a human-only decision gate.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f4f2eb"/>
+      <stop offset="1" stop-color="#e9e7df"/>
+    </linearGradient>
+    <linearGradient id="hero" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#fffdf7"/>
+      <stop offset="1" stop-color="#fff0c9"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#252431" flood-opacity=".10"/>
+    </filter>
+  </defs>
+  <rect width="1440" height="810" fill="url(#bg)"/>
+  <rect x="36" y="28" width="1368" height="64" rx="18" fill="#fffdf7" stroke="#dcd8ce"/>
+  <rect x="56" y="41" width="38" height="38" rx="11" fill="#252431"/>
+  <path d="M65 51h6c7 0 11 4 11 11v12M85 51h-6c-7 0-11 4-11 11v12M75 47v30" fill="none" stroke="#f3b747" stroke-width="4" stroke-linecap="round"/>
+  <text x="108" y="61" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#252431">Forkcast</text>
+  <text x="108" y="77" font-family="Arial, sans-serif" font-size="10" letter-spacing="1" fill="#77727e">HUMAN–AGENT DECISION STUDIO</text>
+  <rect x="1130" y="42" width="108" height="36" rx="18" fill="#fffdf7" stroke="#dcd8ce"/>
+  <text x="1184" y="65" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#252431">Export</text>
+  <rect x="1248" y="42" width="128" height="36" rx="18" fill="#252431"/>
+  <text x="1312" y="65" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#fffdf7">Tool Lab</text>
+
+  <g filter="url(#shadow)">
+    <rect x="36" y="116" width="930" height="250" rx="28" fill="url(#hero)" stroke="#dcd8ce"/>
+    <text x="70" y="156" font-family="Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="2" fill="#77727e">DECISION BRIEF</text>
+    <text x="70" y="206" font-family="Arial, sans-serif" font-size="35" font-weight="700" fill="#252431">Which launch motion should</text>
+    <text x="70" y="247" font-family="Arial, sans-serif" font-size="35" font-weight="700" fill="#252431">the team use for Atlas Notes?</text>
+    <line x1="70" y1="278" x2="930" y2="278" stroke="#dcd8ce"/>
+    <text x="70" y="310" font-family="Arial, sans-serif" font-size="10" font-weight="700" letter-spacing="1.5" fill="#77727e">CONTEXT</text>
+    <text x="70" y="336" font-family="Arial, sans-serif" font-size="14" fill="#4e4b58">Choose a credible launch path without exhausting a six-person product team.</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="990" y="116" width="414" height="250" rx="28" fill="#252431"/>
+    <circle cx="1034" cy="158" r="6" fill="#72cbbb"/>
+    <text x="1051" y="162" font-family="Arial, sans-serif" font-size="11" font-weight="700" fill="#f7f3eb">NATIVE WEBMCP CONNECTED</text>
+    <text x="1026" y="215" font-family="Arial, sans-serif" font-size="27" font-weight="700" fill="#f7f3eb">The agent works</text>
+    <text x="1026" y="247" font-family="Arial, sans-serif" font-size="27" font-weight="700" fill="#f7f3eb">in the page.</text>
+    <text x="1026" y="279" font-family="Arial, sans-serif" font-size="27" font-weight="700" fill="#f3b747">You keep the decision.</text>
+    <rect x="1026" y="307" width="338" height="35" rx="10" fill="#34333e" stroke="#4a4855"/>
+    <text x="1043" y="329" font-family="Arial, sans-serif" font-size="11" fill="#c9c5ce">No tool can commit the final recommendation.</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="36" y="390" width="870" height="382" rx="28" fill="#fffdf7" stroke="#dcd8ce"/>
+    <text x="70" y="430" font-family="Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="2" fill="#77727e">LIVE SYNTHESIS</text>
+    <text x="70" y="463" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#252431">Ranked options</text>
+    <g transform="translate(70 490)">
+      <rect width="800" height="70" rx="14" fill="#fff0c9" stroke="#e4c880"/>
+      <text x="22" y="28" font-family="Arial, sans-serif" font-size="11" font-weight="700" fill="#77727e">01</text>
+      <text x="60" y="28" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#252431">Design-partner rollout</text>
+      <text x="755" y="28" text-anchor="end" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#252431">7.49</text>
+      <rect x="60" y="42" width="690" height="5" rx="2.5" fill="#ddd5c2"/><rect x="60" y="42" width="630" height="5" rx="2.5" fill="#f3b747"/>
+      <text x="60" y="61" font-family="Arial, sans-serif" font-size="9" fill="#77727e">79% confidence</text>
+    </g>
+    <g transform="translate(70 570)">
+      <rect width="800" height="70" rx="14" fill="#f7f5ee" stroke="#dcd8ce"/>
+      <text x="22" y="28" font-family="Arial, sans-serif" font-size="11" font-weight="700" fill="#77727e">02</text>
+      <text x="60" y="28" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#252431">Self-serve public launch</text>
+      <text x="755" y="28" text-anchor="end" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#252431">7.06</text>
+      <rect x="60" y="42" width="690" height="5" rx="2.5" fill="#dcd8ce"/><rect x="60" y="42" width="595" height="5" rx="2.5" fill="#7768d8"/>
+      <text x="60" y="61" font-family="Arial, sans-serif" font-size="9" fill="#77727e">64% confidence</text>
+    </g>
+    <g transform="translate(70 650)">
+      <rect width="800" height="70" rx="14" fill="#f7f5ee" stroke="#dcd8ce"/>
+      <text x="22" y="28" font-family="Arial, sans-serif" font-size="11" font-weight="700" fill="#77727e">03</text>
+      <text x="60" y="28" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#252431">Marketplace partnership</text>
+      <text x="755" y="28" text-anchor="end" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#252431">6.77</text>
+      <rect x="60" y="42" width="690" height="5" rx="2.5" fill="#dcd8ce"/><rect x="60" y="42" width="570" height="5" rx="2.5" fill="#7768d8"/>
+      <text x="60" y="61" font-family="Arial, sans-serif" font-size="9" fill="#77727e">56% confidence</text>
+    </g>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="930" y="390" width="474" height="382" rx="28" fill="#fffdf7" stroke="#dcd8ce"/>
+    <text x="964" y="430" font-family="Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="2" fill="#77727e">HUMAN CONTROL POINT</text>
+    <text x="964" y="463" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#252431">Decision gate</text>
+    <rect x="964" y="491" width="406" height="220" rx="18" fill="#ece8ff" stroke="#cfc7fb"/>
+    <text x="990" y="524" font-family="Arial, sans-serif" font-size="10" font-weight="700" letter-spacing="1.5" fill="#7768d8">STAGED FOR HUMAN REVIEW</text>
+    <text x="990" y="558" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#252431">Design-partner rollout</text>
+    <text x="990" y="590" font-family="Arial, sans-serif" font-size="12" fill="#4e4b58">Leads the base case and remains robust</text>
+    <text x="990" y="608" font-family="Arial, sans-serif" font-size="12" fill="#4e4b58">under the budget-cut scenario.</text>
+    <rect x="990" y="640" width="164" height="42" rx="21" fill="#f3b747"/>
+    <text x="1072" y="666" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#252431">Commit decision</text>
+    <rect x="1164" y="640" width="172" height="42" rx="21" fill="#fffdf7" stroke="#cfc7fb"/>
+    <text x="1250" y="666" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#252431">Return for more work</text>
+    <text x="964" y="744" font-family="Arial, sans-serif" font-size="10" fill="#77727e">Visible evidence · Reversible actions · Human final authority</text>
+  </g>
+</svg>
