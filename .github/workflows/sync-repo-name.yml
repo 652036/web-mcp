@@ -1,0 +1,29 @@
+name: Sync repository name references
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sync-repo-name.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Replace legacy repository references
+        run: |
+          git grep -Il -e 'web-mcp' -- . ':(exclude).github/workflows/sync-repo-name.yml' | while read -r file; do
+            sed -i 's/web-mcp/forkcast/g' "$file"
+          done
+          rm .github/workflows/sync-repo-name.yml
+      - name: Commit synchronized references
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "docs: sync references after repository rename"
+          git push
