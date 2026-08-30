@@ -7,6 +7,7 @@ const requiredIds = [
   'main-content', 'workspace-title', 'webmcp-status', 'ranking-list', 'criteria-list',
   'evidence-matrix', 'scenario-select', 'assumption-list', 'stress-results',
   'recommendation-form', 'staged-review', 'tool-form', 'tool-select', 'tool-input', 'tool-output',
+  'shared-action-actor', 'shared-action-text', 'shared-action-time',
 ];
 
 async function collectJavaScript(directory) {
@@ -39,6 +40,15 @@ for (const id of requiredIds) {
 }
 if (!html.includes('Content-Security-Policy')) throw new Error('index.html needs a Content Security Policy.');
 if (/https?:\/\//.test(html.replace(/http-equiv/g, ''))) throw new Error('index.html must not load third-party network resources.');
+if (!html.includes('id="tool-output"') || !html.includes('aria-live="polite"')) throw new Error('Tool results need an accessible live region.');
+if (!html.includes('data-requires-mutable')) throw new Error('Committed workspaces need visibly disabled mutation controls.');
+
+for (const match of html.matchAll(/<dialog\b[^>]*\baria-labelledby="([^"]+)"/g)) {
+  if (!ids.includes(match[1])) throw new Error(`Dialog label target is missing: ${match[1]}`);
+}
+const dialogCount = [...html.matchAll(/<dialog\b/g)].length;
+const labelledDialogCount = [...html.matchAll(/<dialog\b[^>]*\baria-labelledby=/g)].length;
+if (dialogCount !== labelledDialogCount) throw new Error('Every dialog needs an accessible name.');
 
 const manifest = JSON.parse(await readFile(resolve(root, 'manifest.webmanifest'), 'utf8'));
 if (!manifest.name || !manifest.start_url || !manifest.icons?.length) throw new Error('PWA manifest is incomplete.');
@@ -51,5 +61,18 @@ if (!app.includes("action: 'commit-decision'") && !html.includes('commit-decisio
   throw new Error('Human-visible commitment action is missing.');
 }
 
+const webmcp = await readFile(resolve(root, 'src/webmcp.js'), 'utf8');
+if (!webmcp.includes('document?.modelContext') || !webmcp.includes('registerTool')) {
+  throw new Error('The native document.modelContext registration path is missing.');
+}
+if (!webmcp.includes('AbortController') || !webmcp.includes('activeReady')) {
+  throw new Error('Native WebMCP lifecycle and asynchronous readiness handling are required.');
+}
+
+const staticHeaders = await readFile(resolve(root, '_headers'), 'utf8');
+for (const requiredHeader of ['Origin-Agent-Cluster: ?1', 'Permissions-Policy: tools=(self)', 'Content-Security-Policy:']) {
+  if (!staticHeaders.includes(requiredHeader)) throw new Error(`Static deployment header missing: ${requiredHeader}`);
+}
+
 console.log(`Syntax checked ${files.length} JavaScript files.`);
-console.log(`Verified ${requiredIds.length} required UI anchors, local assets, PWA metadata, and human-control boundary.`);
+console.log(`Verified ${requiredIds.length} UI anchors, accessible dialogs, deployment headers, PWA metadata, and the human-control boundary.`);

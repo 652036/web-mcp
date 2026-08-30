@@ -23,5 +23,3 @@ jobs:
         run: npm ci
       - name: Verify
         run: npm run verify
-      - name: Build static site
-        run: npm run build

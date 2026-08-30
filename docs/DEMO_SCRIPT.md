@@ -1,48 +1,73 @@
-# Forkcast demo script
+# Forkcast — 2:43 demo
 
-## 2–3 minute walkthrough
+## Before recording
 
-### 1. Frame the problem — 20 seconds
+- Use the verified production deployment at `https://forkcast.st2p8g4tkf.chatgpt.site/`, not the GitHub Pages fallback.
+- Confirm the badge says **Native WebMCP connected** before starting.
+- Load the **Product launch** example and refresh once for a clean history.
+- Keep the app and agent side by side at a readable zoom; hide notifications and personal browser data.
+- Rehearse with the exact prompts, trim agent wait time, and target a final runtime of 2:40–2:45. Hard stop at 2:50 so the uploaded video is safely under three minutes.
 
-Open the product-launch example. Explain that the page is the source of truth: three launch alternatives, weighted criteria, evidence, confidence, assumptions, and scenarios are all visible.
+## 0:00–0:15 — The problem
 
-### 2. Show the agent interface — 35 seconds
+Show the full workspace, then say:
 
-Open **Tool Lab** and run:
+> “Important decisions disappear into AI chats. Forkcast makes the decision model the shared surface: evidence, uncertainty, scenarios, and every action stay inspectable.”
 
-```json
-{}
-```
+Point to the live ranking, evidence matrix, and activity trail. Do not scroll through every panel.
 
-with `decision_read_workspace`. Point out that the agent receives structured ids, rankings, gaps, and recommendation state instead of scraping page text.
+## 0:15–0:30 — Prove native WebMCP
 
-Run `decision_find_evidence_gaps` to show that uncertainty is explicit.
+Point to **Native WebMCP connected** and say:
 
-### 3. Collaborate on the decision — 55 seconds
+> “This page registers context-aware tools through `document.modelContext`. The agent uses domain operations, not brittle clicks, and updates the page I see.”
 
-Run `decision_add_option`:
+Briefly open the tool list. Note that irrelevant tools are absent and availability changes with workspace state.
 
-```json
-{
-  "name": "Partner-led launch",
-  "description": "Launch with a specialist distribution partner."
-}
-```
+## 0:30–0:55 — Read before acting
 
-Read the returned option id, then use `decision_score_option` to record one score with confidence and an evidence note. The matrix and ranking update immediately in the visible page.
+Ask the agent:
 
-Create a scenario with `decision_create_scenario`, activate it, and change a criterion weight. Emphasize that the base case is preserved.
+> “Read this Forkcast workspace and identify the two weakest evidence cells. Do not change anything yet.”
 
-### 4. Stress uncertainty — 30 seconds
+The expected calls are `decision_read_workspace` for the compact overview, followed by `decision_find_evidence_gaps` and its `nextCursor` for the two weakest cells. Point out the structured ids, active scenario, leader, and confidence-ranked gaps returned without screen scraping.
 
-Run `decision_run_stress_test` with 2,000 iterations. Show win rates and P10–P90 score ranges. Explain that low-confidence cells vary more than well-supported cells.
+Say: “We are reading the same active scenario, and user-authored notes are marked as untrusted tool output.”
 
-### 5. Cross the control boundary — 35 seconds
+## 0:55–1:30 — Collaborate in visible state
 
-Run `decision_stage_recommendation`. The recommendation appears in the visible Decision gate.
+Continue:
 
-Point out that the tool list contains no final-commit action. Check the human review box and press **Commit decision** manually. Mutation tools then disappear, leaving only read, focus, gap, and export tools.
+> “Add ‘Partner-led launch’ as an alternative. Score it 7.5 on the first criterion at 65 percent confidence with evidence ‘Partner committed to a four-week pilot; onboarding capacity is unverified,’ then show me the matrix.”
 
-### Closing line
+Expected calls: `decision_add_option`, `decision_score_option`, and `decision_focus_view`.
 
-“Forkcast gives an agent meaningful operating authority without hiding the reasoning or surrendering the final human decision.”
+As the page updates, point to the changed matrix cell and ranking, then the “Last shared action” card and audit trail. Say: “Agent changes are visible and undoable, but agent undo cannot cross a later human edit.”
+
+## 1:30–2:00 — Stress the recommendation
+
+Ask:
+
+> “Run 2,000 simulations with seed 20260828 and summarize whether the leader is robust.”
+
+The expected call is `decision_run_stress_test`. Show win rate, expected score, and the P10–P90 range.
+
+Say: “Low-confidence evidence gets wider variance, and the fixed seed makes this reproducible.”
+
+## 2:00–2:35 — Cross the authority boundary
+
+Ask the agent:
+
+> “Stage the current leader with a concise rationale for my review.”
+
+The expected call is `decision_stage_recommendation`. Point to the visible Decision gate and say: “The WebMCP agent can prepare a recommendation, but the site-tool surface has no commit or finalize operation.”
+
+Personally check the review box and press **Commit decision**. Reopen the tool list and show that only four read/focus/export tools remain; visible editing controls are disabled.
+
+## 2:35–2:43 — Close
+
+> “Forkcast gives an agent meaningful analytical authority without hiding its work or surrendering the human decision.”
+
+## Deterministic fallback for rehearsal
+
+The built-in Tool Lab invokes the exact same schemas and handlers and is useful for rehearsal or debugging. The submitted video should still show the native badge and a real browser-agent tool call so the WebMCP integration is unmistakable.

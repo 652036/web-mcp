@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 const root = resolve(process.cwd());
 const dist = resolve(root, 'dist');
-const entries = ['index.html', 'styles.css', 'manifest.webmanifest', 'sw.js', 'assets', 'src'];
+const entries = ['index.html', 'styles.css', 'manifest.webmanifest', 'sw.js', '_headers', 'assets', 'src', '.openai'];
 
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });

@@ -1,4 +1,4 @@
-const CACHE = 'forkcast-shell-v1';
+const CACHE = 'forkcast-shell-v3';
 const APP_SHELL = [
   './',
   './index.html',
@@ -8,6 +8,7 @@ const APP_SHELL = [
   './src/app.js',
   './src/data.js',
   './src/engine.js',
+  './src/storage.js',
   './src/webmcp.js',
 ];
 

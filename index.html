@@ -39,7 +39,7 @@
           <option value="location">APAC support hub</option>
         </select>
       </label>
-      <button id="undo-button" class="button button--ghost" type="button" data-action="undo">Undo</button>
+      <button id="undo-button" class="button button--ghost" type="button" data-action="undo" title="Undo the latest visible change, including a human commit">Undo last change</button>
       <button class="button button--ghost" type="button" data-action="export">Export</button>
       <button class="button button--ink" type="button" data-action="open-tool-lab">Tool Lab</button>
       <button class="theme-toggle" type="button" data-action="toggle-theme" aria-label="Toggle color theme" title="Toggle theme">
@@ -56,7 +56,7 @@
             <span class="eyebrow">Decision brief</span>
             <h1 id="decision-question">Which launch motion should the team use?</h1>
           </div>
-          <button class="button button--ghost" type="button" data-action="edit-brief">Edit brief</button>
+          <button class="button button--ghost" type="button" data-action="edit-brief" data-requires-mutable>Edit brief</button>
         </div>
         <div class="brief-columns">
           <div>
@@ -72,7 +72,7 @@
           <div class="metric"><strong id="option-count">3</strong><span>options</span></div>
           <div class="metric"><strong id="criterion-count">4</strong><span>criteria</span></div>
           <div class="metric metric--attention"><strong id="gap-count">0</strong><span>evidence gaps</span></div>
-          <button class="button button--primary" type="button" data-action="add-option">Add option</button>
+          <button class="button button--primary" type="button" data-action="add-option" data-requires-mutable>Add option</button>
           <button class="button button--ghost" type="button" data-action="reset-workspace">New decision</button>
         </div>
       </article>
@@ -84,10 +84,14 @@
         </div>
         <span class="eyebrow">Shared control</span>
         <h2 id="agent-card-title">The agent works in the page. You keep the decision.</h2>
-        <p>Every agent action updates the same visible evidence, scenarios, and assumptions you can inspect and undo.</p>
+        <p>Every agent action updates the same visible evidence, scenarios, and assumptions. You can explicitly undo the latest visible change, including your own commit.</p>
+        <div class="shared-action" aria-live="polite" aria-atomic="true">
+          <div><span id="shared-action-actor">Workspace</span><time id="shared-action-time"></time></div>
+          <p id="shared-action-text">No shared actions yet.</p>
+        </div>
         <div class="boundary-note">
           <span aria-hidden="true">⌁</span>
-          <p><strong>Human-only boundary</strong>No WebMCP tool can commit the final recommendation.</p>
+          <p><strong>Visible review boundary</strong>No WebMCP tool can commit the final recommendation.</p>
         </div>
       </aside>
     </section>
@@ -124,7 +128,7 @@
               <span class="eyebrow">Human control point</span>
               <h2 id="gate-title">Decision gate</h2>
             </div>
-            <span class="human-only-chip">Human only</span>
+            <span class="human-only-chip">User confirmation</span>
           </div>
           <div class="gate-grid">
             <form id="recommendation-form" class="stack-form">
@@ -136,7 +140,7 @@
                 <span>Rationale</span>
                 <textarea id="recommendation-rationale" name="rationale" rows="5" maxlength="4000" placeholder="Explain why this option leads, what remains uncertain, and what must be true." required></textarea>
               </label>
-              <button id="stage-recommendation-button" class="button button--ink" type="submit">Stage recommendation</button>
+              <button id="stage-recommendation-button" class="button button--ink" type="submit" data-requires-mutable>Stage recommendation</button>
               <p class="form-help">Agents can stage here through WebMCP. Commitment is deliberately unavailable as a tool.</p>
             </form>
             <div id="staged-review" class="staged-review" aria-live="polite"></div>
@@ -148,7 +152,7 @@
         <section class="surface section-card" aria-labelledby="options-title">
           <div class="section-heading section-heading--compact">
             <div><span class="eyebrow">Alternatives</span><h2 id="options-title">Option set</h2></div>
-            <button class="icon-add" type="button" data-action="add-option" aria-label="Add option">+</button>
+            <button class="icon-add" type="button" data-action="add-option" data-requires-mutable aria-label="Add option">+</button>
           </div>
           <div id="option-list" class="option-list"></div>
         </section>
@@ -156,7 +160,7 @@
         <section class="surface section-card" aria-labelledby="criteria-title">
           <div class="section-heading section-heading--compact">
             <div><span class="eyebrow">Values</span><h2 id="criteria-title">Criteria weights</h2></div>
-            <button class="icon-add" type="button" data-action="add-criterion" aria-label="Add criterion">+</button>
+            <button class="icon-add" type="button" data-action="add-criterion" data-requires-mutable aria-label="Add criterion">+</button>
           </div>
           <div id="criteria-list" class="criteria-list"></div>
           <p id="scenario-weight-note" class="form-help"></p>
@@ -165,7 +169,7 @@
         <section id="section-scenarios" class="surface section-card section-anchor" aria-labelledby="scenario-title">
           <div class="section-heading section-heading--compact">
             <div><span class="eyebrow">What-if futures</span><h2 id="scenario-title">Scenario</h2></div>
-            <button class="icon-add" type="button" data-action="add-scenario" aria-label="Add scenario">+</button>
+            <button class="icon-add" type="button" data-action="add-scenario" data-requires-mutable aria-label="Add scenario">+</button>
           </div>
           <label class="select-shell">
             <span class="sr-only">Active scenario</span>
@@ -177,7 +181,7 @@
         <section id="section-assumptions" class="surface section-card section-anchor" aria-labelledby="assumption-title">
           <div class="section-heading section-heading--compact">
             <div><span class="eyebrow">Unknowns</span><h2 id="assumption-title">Assumptions</h2></div>
-            <button class="icon-add" type="button" data-action="add-assumption" aria-label="Add assumption">+</button>
+            <button class="icon-add" type="button" data-action="add-assumption" data-requires-mutable aria-label="Add assumption">+</button>
           </div>
           <div id="assumption-list" class="assumption-list"></div>
         </section>
@@ -185,7 +189,7 @@
         <section id="section-stress" class="surface section-card section-anchor" aria-labelledby="stress-title">
           <div class="section-heading section-heading--compact">
             <div><span class="eyebrow">Uncertainty</span><h2 id="stress-title">Stress test</h2></div>
-            <button class="button button--ghost button--small" type="button" data-action="run-stress">Run 2k</button>
+            <button class="button button--ghost button--small" type="button" data-action="run-stress" data-requires-mutable>Run 2k</button>
           </div>
           <div id="stress-results" class="stress-results"></div>
           <p id="stress-meta" class="form-help"></p>
@@ -206,9 +210,9 @@
     <p>Local-first · No backend · No analytics</p>
   </footer>
 
-  <dialog id="brief-dialog" class="dialog">
+  <dialog id="brief-dialog" class="dialog" aria-labelledby="brief-dialog-title">
     <form id="brief-form" class="dialog-card">
-      <div class="dialog-heading"><div><span class="eyebrow">Decision frame</span><h2>Edit brief</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
+      <div class="dialog-heading"><div><span class="eyebrow">Decision frame</span><h2 id="brief-dialog-title">Edit brief</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
       <label><span>Title</span><input id="brief-title-input" name="title" maxlength="120" required></label>
       <label><span>Decision question</span><textarea id="brief-question-input" name="question" rows="2" maxlength="300" required></textarea></label>
       <label><span>Context</span><textarea id="brief-context-input" name="context" rows="4" maxlength="4000"></textarea></label>
@@ -217,7 +221,7 @@
     </form>
   </dialog>
 
-  <dialog id="option-dialog" class="dialog">
+  <dialog id="option-dialog" class="dialog" aria-labelledby="option-dialog-title">
     <form id="option-form" class="dialog-card">
       <div class="dialog-heading"><div><span class="eyebrow">Alternative</span><h2 id="option-dialog-title">Add option</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
       <input id="option-id-input" name="id" type="hidden">
@@ -227,7 +231,7 @@
     </form>
   </dialog>
 
-  <dialog id="score-dialog" class="dialog">
+  <dialog id="score-dialog" class="dialog" aria-labelledby="score-dialog-title">
     <form id="score-form" class="dialog-card">
       <div class="dialog-heading"><div><span class="eyebrow">Evidence cell</span><h2 id="score-dialog-title">Score option</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
       <input id="score-option-id" name="optionId" type="hidden">
@@ -240,29 +244,29 @@
     </form>
   </dialog>
 
-  <dialog id="criterion-dialog" class="dialog">
+  <dialog id="criterion-dialog" class="dialog" aria-labelledby="criterion-dialog-title">
     <form id="criterion-form" class="dialog-card">
-      <div class="dialog-heading"><div><span class="eyebrow">Decision value</span><h2>Add criterion</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
+      <div class="dialog-heading"><div><span class="eyebrow">Decision value</span><h2 id="criterion-dialog-title">Add criterion</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
       <label><span>Name</span><input name="name" maxlength="160" required></label>
       <label><span>Description</span><textarea name="description" rows="3" maxlength="1000"></textarea></label>
-      <label><span>Raw weight</span><input id="criterion-weight-input" name="weight" type="number" min="0" max="1000" step="1" value="20" required></label>
+      <label><span>Raw weight</span><input id="criterion-weight-input" name="weight" type="number" min="0" max="100" step="1" value="20" required></label>
       <p class="form-help">Raw weights are normalized automatically, so they do not need to sum to 100.</p>
       <div class="dialog-actions"><button class="button button--primary" type="submit">Add criterion</button><button class="button button--ghost" type="button" data-action="close-dialog">Cancel</button></div>
     </form>
   </dialog>
 
-  <dialog id="assumption-dialog" class="dialog">
+  <dialog id="assumption-dialog" class="dialog" aria-labelledby="assumption-dialog-title">
     <form id="assumption-form" class="dialog-card">
-      <div class="dialog-heading"><div><span class="eyebrow">Unknown</span><h2>Add assumption</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
-      <label><span>Assumption</span><textarea name="text" rows="4" maxlength="4000" required></textarea></label>
+      <div class="dialog-heading"><div><span class="eyebrow">Unknown</span><h2 id="assumption-dialog-title">Add assumption</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
+      <label><span>Assumption</span><textarea name="text" rows="4" maxlength="1000" required></textarea></label>
       <label><span>Impact if wrong</span><select name="impact"><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label>
       <div class="dialog-actions"><button class="button button--primary" type="submit">Add assumption</button><button class="button button--ghost" type="button" data-action="close-dialog">Cancel</button></div>
     </form>
   </dialog>
 
-  <dialog id="scenario-dialog" class="dialog">
+  <dialog id="scenario-dialog" class="dialog" aria-labelledby="scenario-dialog-title">
     <form id="scenario-form" class="dialog-card">
-      <div class="dialog-heading"><div><span class="eyebrow">What-if future</span><h2>Create scenario</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
+      <div class="dialog-heading"><div><span class="eyebrow">What-if future</span><h2 id="scenario-dialog-title">Create scenario</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
       <label><span>Name</span><input name="name" maxlength="160" required></label>
       <label><span>Description</span><textarea name="description" rows="4" maxlength="2000"></textarea></label>
       <p class="form-help">After creation, adjust criterion weights and matrix cells while the scenario is active. Base-case values remain intact.</p>
@@ -270,10 +274,10 @@
     </form>
   </dialog>
 
-  <dialog id="tool-dialog" class="dialog dialog--wide">
+  <dialog id="tool-dialog" class="dialog dialog--wide" aria-labelledby="tool-dialog-title">
     <div class="dialog-card tool-lab">
-      <div class="dialog-heading"><div><span class="eyebrow">Browser-agent interface</span><h2>WebMCP Tool Lab</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
-      <p class="dialog-note">This preview invokes the same tool definitions and handlers registered with the browser's native WebMCP API.</p>
+      <div class="dialog-heading"><div><span class="eyebrow">Browser-agent interface</span><h2 id="tool-dialog-title">WebMCP Tool Lab</h2></div><button type="button" class="dialog-close" data-action="close-dialog" aria-label="Close">×</button></div>
+      <p class="dialog-note">This preview validates and invokes the same handlers as native WebMCP, then formats their ordinary return values for display here.</p>
       <div class="tool-grid">
         <form id="tool-form" class="tool-panel">
           <label><span>Tool</span><select id="tool-select"></select></label>
@@ -285,7 +289,7 @@
           <span class="field-label">Input schema</span>
           <pre id="tool-schema" class="code-box"></pre>
           <span class="field-label">Result</span>
-          <pre id="tool-output" class="code-box code-box--result">Select a tool and run it.</pre>
+          <pre id="tool-output" class="code-box code-box--result" aria-live="polite">Select a tool and run it.</pre>
         </div>
       </div>
     </div>

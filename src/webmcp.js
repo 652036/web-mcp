@@ -22,6 +22,7 @@ export function validateInput(schema = { type: 'object' }, value, path = 'input'
   if (typeof value === 'string') {
     if (schema.minLength !== undefined && value.length < schema.minLength) throw new RangeError(`${path} is too short`);
     if (schema.maxLength !== undefined && value.length > schema.maxLength) throw new RangeError(`${path} is too long`);
+    if (schema.pattern !== undefined && !new RegExp(schema.pattern, 'u').test(value)) throw new RangeError(`${path} has an invalid format`);
   }
   if (Array.isArray(value)) {
     if (schema.minItems !== undefined && value.length < schema.minItems) throw new RangeError(`${path} needs at least ${schema.minItems} item(s)`);
@@ -30,92 +31,197 @@ export function validateInput(schema = { type: 'object' }, value, path = 'input'
   }
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const properties = schema.properties ?? {};
+    const keys = Object.keys(value);
+    if (schema.minProperties !== undefined && keys.length < schema.minProperties) {
+      throw new RangeError(`${path} needs at least ${schema.minProperties} field(s)`);
+    }
+    if (schema.maxProperties !== undefined && keys.length > schema.maxProperties) {
+      throw new RangeError(`${path} allows at most ${schema.maxProperties} field(s)`);
+    }
     for (const required of schema.required ?? []) {
-      if (!(required in value)) throw new TypeError(`${path}.${required} is required`);
+      if (!Object.hasOwn(value, required)) throw new TypeError(`${path}.${required} is required`);
     }
     if (schema.additionalProperties === false) {
-      const unknown = Object.keys(value).find((key) => !(key in properties));
+      const unknown = keys.find((key) => !Object.hasOwn(properties, key));
       if (unknown) throw new TypeError(`${path}.${unknown} is not allowed`);
     }
     for (const [key, child] of Object.entries(properties)) {
-      if (key in value) validateInput(child, value[key], `${path}.${key}`);
+      if (Object.hasOwn(value, key)) validateInput(child, value[key], `${path}.${key}`);
     }
   }
   return true;
 }
 
-export function textResult(value) {
-  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-  return {
-    content: [{ type: 'text', text }],
-    structuredContent: typeof value === 'string' ? { text: value } : value,
-  };
+function errorMessage(value) {
+  if (value instanceof Error) return value.message || value.name;
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return 'Tool execution failed.';
+  }
 }
 
 let activeController = null;
+let activeContext = null;
+let activeFingerprint = '';
+let activeGeneration = 0;
+let activeMode = 'preview';
+let activeError = null;
+let activeReady = Promise.resolve();
 let activeTools = [];
 
 export function getModelContext() {
-  return globalThis.document?.modelContext ?? globalThis.navigator?.modelContext ?? null;
+  return globalThis.document?.modelContext ?? null;
+}
+
+function fingerprint(tools) {
+  return JSON.stringify(tools.map(({ name, title, description, inputSchema, annotations }) => ({
+    name, title, description, inputSchema, annotations,
+  })));
+}
+
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  if (typeof signal.throwIfAborted === 'function') signal.throwIfAborted();
+  throw signal.reason ?? new DOMException('The tool call was aborted.', 'AbortError');
+}
+
+async function executeActiveTool(name, input = {}, { signal } = {}) {
+  const tool = activeTools.find((item) => item.name === name);
+  if (!tool) throw new Error(`Unknown or unavailable tool: ${name}`);
+  throwIfAborted(signal);
+  validateInput(tool.inputSchema ?? schemas.empty, input);
+  const result = await tool.execute(input, { signal });
+  throwIfAborted(signal);
+  return result;
+}
+
+function publicTools() {
+  return activeTools.map(({ execute: _execute, ...tool }) => tool);
+}
+
+function status() {
+  return {
+    mode: activeMode,
+    toolCount: activeTools.length,
+    error: activeError ? errorMessage(activeError) : null,
+  };
+}
+
+function exposePreviewBridge() {
+  globalThis.__forkcastWebMCP = {
+    listTools: publicTools,
+    executeTool: (name, input = {}, options = {}) => executeActiveTool(name, input, options),
+    status,
+  };
+}
+
+function registrationDefinition(tool) {
+  return {
+    name: tool.name,
+    ...(tool.title ? { title: tool.title } : {}),
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+    annotations: tool.annotations,
+    // WebMCP's imperative API accepts ordinary structured-cloneable return
+    // values. Validation and domain errors intentionally reject the promise so
+    // the browser agent receives the native failure rather than an MCP-server
+    // content envelope.
+    execute: (input, options = {}) => executeActiveTool(
+      tool.name,
+      input ?? {},
+      { signal: options.signal },
+    ),
+  };
+}
+
+export function uninstallWebMCP() {
+  activeGeneration += 1;
+  activeController?.abort();
+  activeController = null;
+  activeContext = null;
+  activeFingerprint = '';
+  activeMode = 'preview';
+  activeError = null;
+  activeReady = Promise.resolve();
 }
 
 export function installWebMCP(tools, { onStatus = () => {} } = {}) {
-  activeController?.abort();
-  activeController = new AbortController();
   activeTools = tools;
-
-  const execute = async (name, input = {}) => {
-    const tool = activeTools.find((item) => item.name === name);
-    if (!tool) throw new Error(`Unknown tool: ${name}`);
-    validateInput(tool.inputSchema ?? { type: 'object' }, input);
-    const result = await tool.execute(input, { signal: activeController.signal });
-    return result;
-  };
-
-  globalThis.__forkcastWebMCP = {
-    listTools: () => activeTools.map(({ execute: _execute, ...tool }) => tool),
-    executeTool: execute,
-    status: () => ({ mode: getModelContext() ? 'native' : 'preview', toolCount: activeTools.length }),
-  };
+  exposePreviewBridge();
 
   const context = getModelContext();
+  const nextFingerprint = fingerprint(tools);
+  const execute = (name, input = {}, options = {}) => executeActiveTool(name, input, options);
+
   if (!context?.registerTool) {
-    onStatus({ mode: 'preview', toolCount: tools.length, message: 'Tool Lab preview' });
-    return { mode: 'preview', toolCount: tools.length, execute };
+    if (activeController) uninstallWebMCP();
+    activeTools = tools;
+    activeMode = 'preview';
+    exposePreviewBridge();
+    onStatus({ ...status(), message: 'Tool Lab preview' });
+    return { mode: activeMode, toolCount: tools.length, execute, ready: activeReady };
   }
 
-  try {
-    for (const tool of tools) {
-      const definition = {
-        name: tool.name,
-        description: tool.description,
-        inputSchema: tool.inputSchema,
-        annotations: tool.annotations,
-        execute: async (input, metadata = {}) => {
-          validateInput(tool.inputSchema ?? { type: 'object' }, input ?? {});
-          const result = await tool.execute(input ?? {}, {
-            signal: metadata.signal ?? activeController.signal,
-          });
-          return textResult(result);
-        },
-      };
-      context.registerTool(definition, { signal: activeController.signal });
-    }
-    onStatus({ mode: 'native', toolCount: tools.length, message: 'Native WebMCP connected' });
-    return { mode: 'native', toolCount: tools.length, execute };
-  } catch (error) {
-    console.warn('Native WebMCP registration failed; using Tool Lab preview.', error);
-    onStatus({ mode: 'preview', toolCount: tools.length, message: 'Preview fallback active', error });
-    return { mode: 'preview', toolCount: tools.length, execute };
+  if (
+    context === activeContext
+    && nextFingerprint === activeFingerprint
+    && activeController
+    && !activeController.signal.aborted
+  ) {
+    const message = activeMode === 'native'
+      ? 'Native WebMCP connected'
+      : activeMode === 'connecting'
+        ? 'Connecting native WebMCP…'
+        : 'Preview fallback active';
+    onStatus({ ...status(), message });
+    return { mode: activeMode, toolCount: tools.length, execute, ready: activeReady };
   }
+
+  activeController?.abort();
+  activeController = new AbortController();
+  activeContext = context;
+  activeFingerprint = nextFingerprint;
+  activeMode = 'connecting';
+  activeError = null;
+  const generation = ++activeGeneration;
+  const controller = activeController;
+
+  onStatus({ ...status(), message: 'Connecting native WebMCP…' });
+
+  activeReady = Promise.all(tools.map((tool) => Promise.resolve().then(() => (
+    context.registerTool(registrationDefinition(tool), { signal: controller.signal })
+  ))))
+    .then(() => {
+      if (generation !== activeGeneration || controller.signal.aborted) return;
+      activeMode = 'native';
+      onStatus({ ...status(), message: 'Native WebMCP connected' });
+    })
+    .catch((error) => {
+      if (generation !== activeGeneration || controller.signal.aborted) return;
+      controller.abort();
+      activeMode = 'preview';
+      activeError = error;
+      console.warn('Native WebMCP registration failed; using Tool Lab preview.', error);
+      onStatus({ ...status(), message: 'Preview fallback active' });
+    });
+
+  return { mode: activeMode, toolCount: tools.length, execute, ready: activeReady };
 }
 
 export const schemas = {
   empty: { type: 'object', properties: {}, additionalProperties: false },
-  id: { type: 'string', minLength: 1, maxLength: 120 },
+  id: {
+    type: 'string',
+    minLength: 1,
+    maxLength: 120,
+    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$',
+    description: 'A stable workspace id returned by a read or create tool.',
+  },
   shortText: { type: 'string', minLength: 1, maxLength: 160 },
   longText: { type: 'string', minLength: 1, maxLength: 4000 },
   score: { type: 'number', minimum: 0, maximum: 10 },
   confidence: { type: 'number', minimum: 0, maximum: 100 },
-  weight: { type: 'number', minimum: 0, maximum: 1000 },
+  weight: { type: 'number', minimum: 0, maximum: 100 },
 };

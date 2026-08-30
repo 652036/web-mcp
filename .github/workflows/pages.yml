@@ -31,7 +31,6 @@ jobs:
         run: |
           npm ci
           npm run verify
-          npm run build
       - name: Check whether Pages is enabled
         id: pages
         env:
