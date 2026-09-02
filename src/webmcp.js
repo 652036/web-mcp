@@ -1,3 +1,5 @@
+import { ID_PATTERN_SOURCE } from './engine.js';
+
 function typeMatches(value, type) {
   if (type === 'array') return Array.isArray(value);
   if (type === 'null') return value === null;
@@ -62,23 +64,33 @@ function errorMessage(value) {
   }
 }
 
-let activeController = null;
+/** name -> { controller, fingerprint, ready } for every natively registered tool. */
+const registry = new Map();
 let activeContext = null;
-let activeFingerprint = '';
 let activeGeneration = 0;
 let activeMode = 'preview';
 let activeError = null;
 let activeReady = Promise.resolve();
 let activeTools = [];
+let inFlight = 0;
+let pendingInstall = null;
+let previewReason = null;
 
 export function getModelContext() {
-  return globalThis.document?.modelContext ?? null;
+  return globalThis.document?.modelContext ?? globalThis.navigator?.modelContext ?? null;
 }
 
-function fingerprint(tools) {
-  return JSON.stringify(tools.map(({ name, title, description, inputSchema, annotations }) => ({
-    name, title, description, inputSchema, annotations,
-  })));
+/** WebMCP tools belong to the top-level document; an embedded frame never registers natively. */
+export function isEmbedded() {
+  try {
+    return globalThis.top !== undefined && globalThis.top !== globalThis.self;
+  } catch {
+    return true;
+  }
+}
+
+function fingerprint({ name, title, description, inputSchema, annotations }) {
+  return JSON.stringify({ name, title, description, inputSchema, annotations });
 }
 
 function throwIfAborted(signal) {
@@ -87,14 +99,36 @@ function throwIfAborted(signal) {
   throw signal.reason ?? new DOMException('The tool call was aborted.', 'AbortError');
 }
 
+function flushPendingInstall() {
+  if (inFlight > 0 || !pendingInstall) return;
+  const { tools, onStatus } = pendingInstall;
+  pendingInstall = null;
+  try {
+    reconcile(tools, onStatus);
+  } catch (error) {
+    console.warn('Deferred WebMCP refresh failed.', error);
+  }
+}
+
+/**
+ * Registry changes requested while a tool call is executing are applied only
+ * after the call has returned, on a fresh task, so a tool can never abort its
+ * own in-progress invocation through the state change it just made.
+ */
 async function executeActiveTool(name, input = {}, { signal } = {}) {
   const tool = activeTools.find((item) => item.name === name);
   if (!tool) throw new Error(`Unknown or unavailable tool: ${name}`);
   throwIfAborted(signal);
   validateInput(tool.inputSchema ?? schemas.empty, input);
-  const result = await tool.execute(input, { signal });
-  throwIfAborted(signal);
-  return result;
+  inFlight += 1;
+  try {
+    const result = await tool.execute(input, { signal });
+    throwIfAborted(signal);
+    return result;
+  } finally {
+    inFlight -= 1;
+    if (inFlight === 0 && pendingInstall) setTimeout(flushPendingInstall, 0);
+  }
 }
 
 function publicTools() {
@@ -105,8 +139,17 @@ function status() {
   return {
     mode: activeMode,
     toolCount: activeTools.length,
+    registeredCount: registry.size,
+    inFlight,
+    reason: activeMode === 'preview' ? previewReason : null,
     error: activeError ? errorMessage(activeError) : null,
   };
+}
+
+function statusMessage() {
+  if (activeMode === 'native') return 'Native WebMCP connected';
+  if (activeMode === 'connecting') return 'Connecting native WebMCP…';
+  return activeError ? 'Preview fallback active' : 'Tool Lab preview';
 }
 
 function exposePreviewBridge() {
@@ -114,6 +157,7 @@ function exposePreviewBridge() {
     listTools: publicTools,
     executeTool: (name, input = {}, options = {}) => executeActiveTool(name, input, options),
     status,
+    ready: () => activeReady,
   };
 }
 
@@ -136,77 +180,112 @@ function registrationDefinition(tool) {
   };
 }
 
+function clearRegistry() {
+  for (const entry of registry.values()) entry.controller.abort();
+  registry.clear();
+}
+
+function enterPreview(onStatus, { error = null, reason = 'unsupported' } = {}) {
+  clearRegistry();
+  activeMode = 'preview';
+  activeError = error;
+  previewReason = error ? 'registration-failed' : reason;
+  activeReady = Promise.resolve();
+  onStatus({ ...status(), message: statusMessage() });
+}
+
+/**
+ * Diff the desired tool set against the native registry: abort only tools
+ * that disappeared or changed shape, register only tools that are new or
+ * changed, and leave content-equivalent registrations untouched.
+ */
+function reconcile(tools, onStatus) {
+  activeTools = tools;
+  exposePreviewBridge();
+  const context = getModelContext();
+
+  if (isEmbedded()) {
+    enterPreview(onStatus, { reason: 'embedded' });
+    return;
+  }
+  if (!context?.registerTool) {
+    enterPreview(onStatus, { reason: 'unsupported' });
+    return;
+  }
+  if (context !== activeContext) {
+    clearRegistry();
+    activeContext = context;
+  }
+
+  const desired = new Set(tools.map((tool) => tool.name));
+  for (const [name, entry] of registry) {
+    if (desired.has(name)) continue;
+    entry.controller.abort();
+    registry.delete(name);
+  }
+
+  let added = 0;
+  for (const tool of tools) {
+    const nextFingerprint = fingerprint(tool);
+    const existing = registry.get(tool.name);
+    if (existing && existing.fingerprint === nextFingerprint) continue;
+    existing?.controller.abort();
+    const controller = new AbortController();
+    const ready = Promise.resolve()
+      .then(() => context.registerTool(registrationDefinition(tool), { signal: controller.signal }))
+      .catch((error) => {
+        // A registration that was intentionally aborted (removed or replaced)
+        // is not a failure of the remaining registry.
+        if (controller.signal.aborted) return;
+        throw error;
+      });
+    registry.set(tool.name, { controller, fingerprint: nextFingerprint, ready });
+    added += 1;
+  }
+
+  const generation = ++activeGeneration;
+  if (added) {
+    activeMode = 'connecting';
+    activeError = null;
+    onStatus({ ...status(), message: statusMessage() });
+  }
+  activeReady = Promise.all([...registry.values()].map((entry) => entry.ready))
+    .then(() => {
+      if (generation !== activeGeneration) return;
+      const changed = activeMode !== 'native';
+      activeMode = 'native';
+      if (changed || added) onStatus({ ...status(), message: statusMessage() });
+    })
+    .catch((error) => {
+      if (generation !== activeGeneration) return;
+      console.warn('Native WebMCP registration failed; using Tool Lab preview.', error);
+      enterPreview(onStatus, { error });
+    });
+  if (!added) onStatus({ ...status(), message: statusMessage() });
+}
+
 export function uninstallWebMCP() {
   activeGeneration += 1;
-  activeController?.abort();
-  activeController = null;
+  pendingInstall = null;
+  clearRegistry();
   activeContext = null;
-  activeFingerprint = '';
   activeMode = 'preview';
   activeError = null;
+  previewReason = null;
   activeReady = Promise.resolve();
 }
 
 export function installWebMCP(tools, { onStatus = () => {} } = {}) {
   activeTools = tools;
   exposePreviewBridge();
-
-  const context = getModelContext();
-  const nextFingerprint = fingerprint(tools);
   const execute = (name, input = {}, options = {}) => executeActiveTool(name, input, options);
 
-  if (!context?.registerTool) {
-    if (activeController) uninstallWebMCP();
-    activeTools = tools;
-    activeMode = 'preview';
-    exposePreviewBridge();
-    onStatus({ ...status(), message: 'Tool Lab preview' });
-    return { mode: activeMode, toolCount: tools.length, execute, ready: activeReady };
+  if (inFlight > 0) {
+    pendingInstall = { tools, onStatus };
+    onStatus({ ...status(), message: statusMessage() });
+  } else {
+    reconcile(tools, onStatus);
   }
-
-  if (
-    context === activeContext
-    && nextFingerprint === activeFingerprint
-    && activeController
-    && !activeController.signal.aborted
-  ) {
-    const message = activeMode === 'native'
-      ? 'Native WebMCP connected'
-      : activeMode === 'connecting'
-        ? 'Connecting native WebMCP…'
-        : 'Preview fallback active';
-    onStatus({ ...status(), message });
-    return { mode: activeMode, toolCount: tools.length, execute, ready: activeReady };
-  }
-
-  activeController?.abort();
-  activeController = new AbortController();
-  activeContext = context;
-  activeFingerprint = nextFingerprint;
-  activeMode = 'connecting';
-  activeError = null;
-  const generation = ++activeGeneration;
-  const controller = activeController;
-
-  onStatus({ ...status(), message: 'Connecting native WebMCP…' });
-
-  activeReady = Promise.all(tools.map((tool) => Promise.resolve().then(() => (
-    context.registerTool(registrationDefinition(tool), { signal: controller.signal })
-  ))))
-    .then(() => {
-      if (generation !== activeGeneration || controller.signal.aborted) return;
-      activeMode = 'native';
-      onStatus({ ...status(), message: 'Native WebMCP connected' });
-    })
-    .catch((error) => {
-      if (generation !== activeGeneration || controller.signal.aborted) return;
-      controller.abort();
-      activeMode = 'preview';
-      activeError = error;
-      console.warn('Native WebMCP registration failed; using Tool Lab preview.', error);
-      onStatus({ ...status(), message: 'Preview fallback active' });
-    });
-
   return { mode: activeMode, toolCount: tools.length, execute, ready: activeReady };
 }
 
@@ -216,7 +295,7 @@ export const schemas = {
     type: 'string',
     minLength: 1,
     maxLength: 120,
-    pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$',
+    pattern: ID_PATTERN_SOURCE,
     description: 'A stable workspace id returned by a read or create tool.',
   },
   shortText: { type: 'string', minLength: 1, maxLength: 160 },

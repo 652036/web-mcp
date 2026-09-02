@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Forkcast is an inspectable human–agent decision studio built for WebMCP.">
   <meta name="theme-color" content="#252431">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self';">
   <title>Forkcast — Human–Agent Decision Studio</title>
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="manifest" href="manifest.webmanifest">
@@ -40,7 +40,10 @@
         </select>
       </label>
       <button id="undo-button" class="button button--ghost" type="button" data-action="undo" title="Undo the latest visible change, including a human commit">Undo last change</button>
-      <button class="button button--ghost" type="button" data-action="export">Export</button>
+      <button class="button button--ghost" type="button" data-action="export" title="Download the decision record as Markdown">Export .md</button>
+      <button class="button button--ghost" type="button" data-action="export-json" title="Download the full workspace as JSON for backup or transfer">Export .json</button>
+      <button class="button button--ghost" type="button" data-action="import-json" title="Replace the current workspace with a Forkcast JSON export">Import</button>
+      <input id="import-file" type="file" accept="application/json,.json" hidden>
       <button class="button button--ink" type="button" data-action="open-tool-lab">Tool Lab</button>
       <button class="theme-toggle" type="button" data-action="toggle-theme" aria-label="Toggle color theme" title="Toggle theme">
         <span aria-hidden="true">◐</span>
@@ -49,6 +52,11 @@
   </header>
 
   <main id="main-content" class="page-shell">
+    <div id="storage-notice" class="notice" role="status" hidden>
+      <p id="storage-notice-text"></p>
+      <button class="button button--ghost button--small" type="button" data-action="dismiss-notice">Dismiss</button>
+    </div>
+
     <section id="section-brief" class="hero-grid section-anchor" aria-labelledby="decision-question">
       <article class="brief-card surface surface--hero">
         <div class="section-heading section-heading--hero">
@@ -78,7 +86,7 @@
       </article>
 
       <aside class="surface agent-card" aria-labelledby="agent-card-title">
-        <div id="webmcp-status" class="connection-badge" data-mode="preview">
+        <div id="webmcp-status" class="connection-badge" data-mode="preview" role="status" aria-live="polite">
           <span class="connection-dot" aria-hidden="true"></span>
           <div><strong>Tool Lab preview</strong><span>0 tools</span></div>
         </div>
@@ -118,7 +126,7 @@
             <span class="legend"><i></i> Needs evidence</span>
           </div>
           <div class="table-scroll">
-            <table id="evidence-matrix" class="matrix-table"></table>
+            <table id="evidence-matrix" class="matrix-table" aria-labelledby="matrix-title"></table>
           </div>
         </section>
 
@@ -189,7 +197,7 @@
         <section id="section-stress" class="surface section-card section-anchor" aria-labelledby="stress-title">
           <div class="section-heading section-heading--compact">
             <div><span class="eyebrow">Uncertainty</span><h2 id="stress-title">Stress test</h2></div>
-            <button class="button button--ghost button--small" type="button" data-action="run-stress" data-requires-mutable>Run 2k</button>
+            <button id="run-stress-button" class="button button--ghost button--small" type="button" data-action="run-stress" data-requires-mutable aria-pressed="false" title="Run 2,000 seeded simulations on the active scenario">Run 2k</button>
           </div>
           <div id="stress-results" class="stress-results"></div>
           <p id="stress-meta" class="form-help"></p>

@@ -3,7 +3,9 @@ import { resolve } from 'node:path';
 
 const root = resolve(process.cwd());
 const dist = resolve(root, 'dist');
-const entries = ['index.html', 'styles.css', 'manifest.webmanifest', 'sw.js', '_headers', 'assets', 'src', '.openai'];
+// `.openai/hosting.json` stays at the repository root: the hosting CLI reads it
+// from there, and copying it into dist/ would publish it at /.openai/hosting.json.
+const entries = ['index.html', 'styles.css', 'manifest.webmanifest', 'sw.js', '_headers', 'assets', 'src'];
 
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });

@@ -8,6 +8,7 @@ const requiredIds = [
   'evidence-matrix', 'scenario-select', 'assumption-list', 'stress-results',
   'recommendation-form', 'staged-review', 'tool-form', 'tool-select', 'tool-input', 'tool-output',
   'shared-action-actor', 'shared-action-text', 'shared-action-time',
+  'storage-notice', 'storage-notice-text', 'import-file', 'run-stress-button',
 ];
 
 async function collectJavaScript(directory) {
@@ -39,6 +40,9 @@ for (const id of requiredIds) {
   if (!ids.includes(id)) throw new Error(`Missing required HTML id: ${id}`);
 }
 if (!html.includes('Content-Security-Policy')) throw new Error('index.html needs a Content Security Policy.');
+if (/frame-ancestors/.test(html)) throw new Error('frame-ancestors is ignored in a <meta> CSP; deliver it from _headers instead.');
+if (/unsafe-inline/.test(html)) throw new Error("The CSP must not allow 'unsafe-inline'; set widths through element.style instead.");
+if (/\sstyle="/.test(html)) throw new Error('index.html must not use inline style attributes.');
 if (/https?:\/\//.test(html.replace(/http-equiv/g, ''))) throw new Error('index.html must not load third-party network resources.');
 if (!html.includes('id="tool-output"') || !html.includes('aria-live="polite"')) throw new Error('Tool results need an accessible live region.');
 if (!html.includes('data-requires-mutable')) throw new Error('Committed workspaces need visibly disabled mutation controls.');
@@ -54,11 +58,20 @@ const manifest = JSON.parse(await readFile(resolve(root, 'manifest.webmanifest')
 if (!manifest.name || !manifest.start_url || !manifest.icons?.length) throw new Error('PWA manifest is incomplete.');
 
 const app = await readFile(resolve(root, 'src/app.js'), 'utf8');
-if (app.includes("name: 'decision_commit") || app.includes('decision_finalize')) {
-  throw new Error('Safety invariant failed: final commitment must not be exposed as a WebMCP tool.');
+const tools = await readFile(resolve(root, 'src/tools.js'), 'utf8');
+for (const source of [app, tools]) {
+  if (source.includes("name: 'decision_commit") || source.includes('decision_finalize')) {
+    throw new Error('Safety invariant failed: final commitment must not be exposed as a WebMCP tool.');
+  }
 }
 if (!app.includes("action: 'commit-decision'") && !html.includes('commit-decision')) {
   throw new Error('Human-visible commitment action is missing.');
+}
+if (/\bstyle:\s*`/.test(app) || /setAttribute\('style'/.test(app)) {
+  throw new Error("app.js must not emit inline style attributes; the CSP has no 'unsafe-inline'.");
+}
+if (!/if \(workspace\(\)\.committedDecision\) return tools;/.test(tools)) {
+  throw new Error('Write tools must be removed from the registry once the decision is committed.');
 }
 
 const webmcp = await readFile(resolve(root, 'src/webmcp.js'), 'utf8');
@@ -68,11 +81,15 @@ if (!webmcp.includes('document?.modelContext') || !webmcp.includes('registerTool
 if (!webmcp.includes('AbortController') || !webmcp.includes('activeReady')) {
   throw new Error('Native WebMCP lifecycle and asynchronous readiness handling are required.');
 }
+if (!webmcp.includes('isEmbedded')) throw new Error('Embedded frames must skip native registration.');
 
-const staticHeaders = await readFile(resolve(root, '_headers'), 'utf8');
-for (const requiredHeader of ['Origin-Agent-Cluster: ?1', 'Permissions-Policy: tools=(self)', 'Content-Security-Policy:']) {
-  if (!staticHeaders.includes(requiredHeader)) throw new Error(`Static deployment header missing: ${requiredHeader}`);
+// `_headers` is optional hardening for header-capable hosts (Netlify, Cloudflare
+// Pages). The production host (ChatGPT Sites) ignores it, so nothing at runtime
+// may depend on these headers; this check only keeps the file itself coherent.
+const optionalHeaders = await readFile(resolve(root, '_headers'), 'utf8');
+for (const header of ['Origin-Agent-Cluster: ?1', 'Permissions-Policy: tools=(self)', 'Content-Security-Policy:', "frame-ancestors 'none'", 'X-Frame-Options: DENY']) {
+  if (!optionalHeaders.includes(header)) throw new Error(`Optional deploy headers file _headers is missing ${header}`);
 }
 
 console.log(`Syntax checked ${files.length} JavaScript files.`);
-console.log(`Verified ${requiredIds.length} UI anchors, accessible dialogs, deployment headers, PWA metadata, and the human-control boundary.`);
+console.log(`Verified ${requiredIds.length} UI anchors, accessible dialogs, the optional deploy headers file, PWA metadata, and the human-control boundary.`);

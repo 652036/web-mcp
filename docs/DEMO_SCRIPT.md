@@ -2,8 +2,8 @@
 
 ## Before recording
 
-- Use the verified production deployment at `https://forkcast.st2p8g4tkf.chatgpt.site/`, not the GitHub Pages fallback.
-- Confirm the badge says **Native WebMCP connected** before starting.
+- Use the verified production deployment at `https://forkcast.st2p8g4tkf.chatgpt.site/`, not the GitHub Pages fallback. Run `npm run check:prod` first so the deployed build matches the repository.
+- Use Chrome 150+ with `chrome://flags/#enable-webmcp-testing` enabled (or the ChatGPT in-app browser) and confirm the badge says **Native WebMCP connected · 19 tools** before starting. In preview mode the badge itself shows the enablement hint.
 - Load the **Product launch** example and refresh once for a clean history.
 - Keep the app and agent side by side at a readable zoom; hide notifications and personal browser data.
 - Rehearse with the exact prompts, trim agent wait time, and target a final runtime of 2:40–2:45. Hard stop at 2:50 so the uploaded video is safely under three minutes.
@@ -20,9 +20,9 @@ Point to the live ranking, evidence matrix, and activity trail. Do not scroll th
 
 Point to **Native WebMCP connected** and say:
 
-> “This page registers context-aware tools through `document.modelContext`. The agent uses domain operations, not brittle clicks, and updates the page I see.”
+> “This page registers 19 typed decision tools through `document.modelContext`. The agent uses domain operations, not brittle clicks, and updates the page I see.”
 
-Briefly open the tool list. Note that irrelevant tools are absent and availability changes with workspace state.
+Briefly open the tool list. Note that 19 tools are registered while the decision is open, and that none of them can commit the decision.
 
 ## 0:30–0:55 — Read before acting
 

@@ -381,6 +381,25 @@ select:focus-visible,
   padding: clamp(2rem, 5vw, 5.5rem) 0 4rem;
 }
 
+.notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, var(--line));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-soft) 75%, var(--surface));
+  color: var(--ink);
+}
+
+.notice p {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
 .surface {
   border: 1px solid color-mix(in srgb, var(--line) 86%, transparent);
   border-radius: var(--radius-xl);
@@ -516,6 +535,7 @@ select:focus-visible,
   align-items: center;
   gap: 0.7rem;
   width: fit-content;
+  max-width: 100%;
   margin-bottom: 2rem;
   padding: 0.6rem 0.8rem;
   border: 1px solid rgba(255, 255, 255, 0.13);
@@ -523,10 +543,25 @@ select:focus-visible,
   background: rgba(255, 255, 255, 0.07);
 }
 
+.connection-badge[data-mode="preview"] {
+  align-items: flex-start;
+  border-radius: var(--radius-md);
+}
+
+.connection-badge[data-mode="preview"] .connection-dot {
+  margin-top: 0.3rem;
+}
+
 .connection-badge > div {
   display: flex;
   flex-direction: column;
   gap: 0.05rem;
+  min-width: 0;
+}
+
+.connection-badge span:not(.connection-dot) {
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .connection-badge strong {
@@ -536,10 +571,11 @@ select:focus-visible,
 
 .connection-badge span:not(.connection-dot) {
   color: #aaa5b3;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
 }
 
 .connection-dot {
+  flex: 0 0 auto;
   width: 9px;
   height: 9px;
   border-radius: 50%;
@@ -574,7 +610,7 @@ select:focus-visible,
   justify-content: space-between;
   gap: 1rem;
   color: #aaa5b3;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -806,7 +842,7 @@ select:focus-visible,
   display: block;
   margin-top: 0.25rem;
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
 }
 
 .matrix-cell {
@@ -841,7 +877,7 @@ select:focus-visible,
 .matrix-cell span,
 .matrix-cell small {
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
 }
 
 .decision-gate {
@@ -1031,7 +1067,7 @@ textarea {
   border-radius: 50%;
   color: var(--muted);
   background: var(--surface);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 800;
 }
 
@@ -1055,14 +1091,14 @@ textarea {
 
 .option-chip__copy span {
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
 }
 
 .icon-button {
   padding: 0.4rem;
   color: var(--muted);
   background: transparent;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 700;
 }
 
@@ -1088,7 +1124,7 @@ textarea {
 
 .criterion-row__copy span {
   color: var(--muted);
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 400;
   line-height: 1.35;
 }
@@ -1154,14 +1190,14 @@ input[type="range"] {
 
 .assumption-row__copy span {
   color: var(--muted);
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   text-transform: capitalize;
 }
 
 .assumption-row select {
   min-height: 34px;
   padding: 0.45rem 0.55rem;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
 }
 
 .stress-empty {
@@ -1215,11 +1251,36 @@ input[type="range"] {
 
 .stress-row small {
   color: var(--muted);
-  font-size: 0.65rem;
+  font-size: 0.75rem;
 }
 
 .stress-row--leader .win-track span {
   background: var(--mint);
+}
+
+.stress-results--stale .stress-row {
+  opacity: 0.62;
+  border-style: dashed;
+}
+
+.stress-stale {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, var(--line));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.stress-results[aria-busy="true"] {
+  opacity: 0.7;
+}
+
+#run-stress-button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--line));
+  color: var(--danger);
 }
 
 .activity-list {
@@ -1233,7 +1294,7 @@ input[type="range"] {
 .activity-list li {
   position: relative;
   display: grid;
-  grid-template-columns: 54px 1fr;
+  grid-template-columns: 64px 1fr;
   gap: 0.65rem;
   padding: 0.75rem 0;
   border-bottom: 1px solid var(--line);
@@ -1253,7 +1314,7 @@ input[type="range"] {
   border-radius: 999px;
   color: var(--muted);
   background: var(--surface-muted);
-  font-size: 0.6rem;
+  font-size: 0.75rem;
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -1276,7 +1337,7 @@ input[type="range"] {
 
 .activity-list time {
   color: var(--muted);
-  font-size: 0.62rem;
+  font-size: 0.75rem;
 }
 
 .empty-state {
@@ -1460,10 +1521,41 @@ input[type="range"] {
 @media (max-width: 1220px) {
   .site-header {
     grid-template-columns: auto 1fr;
+    grid-template-areas:
+      "brand actions"
+      "center center";
+    row-gap: 0.5rem;
   }
 
+  .brand {
+    grid-area: brand;
+  }
+
+  .header-actions {
+    grid-area: actions;
+  }
+
+  /* The workspace title and status pill are core state: collapse them under the
+     brand row instead of hiding them. */
   .header-center {
-    display: none;
+    grid-area: center;
+    grid-template-columns: auto minmax(0, auto) auto;
+    justify-content: start;
+    gap: 0.35rem 0.6rem;
+    text-align: left;
+  }
+
+  .header-center .workspace-kicker {
+    grid-column: auto;
+  }
+
+  .header-center .workspace-kicker::after {
+    content: ":";
+  }
+
+  .header-center > strong {
+    max-width: 48ch;
+    font-size: 0.9rem;
   }
 
   .workspace-grid {
@@ -1475,12 +1567,20 @@ input[type="range"] {
   .site-header {
     position: relative;
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "brand"
+      "center"
+      "actions";
   }
 
   .header-actions {
     justify-content: flex-start;
     overflow-x: auto;
     padding-bottom: 0.2rem;
+  }
+
+  .header-center > strong {
+    max-width: 100%;
   }
 
   .hero-grid,

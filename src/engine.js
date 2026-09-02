@@ -24,15 +24,19 @@ export const WORKSPACE_LIMITS = Object.freeze({
 });
 
 export const TOOL_RESULT_LIMITS = Object.freeze({
-  pageSize: 1,
-  exportChars: 1800,
-  defaultExportChars: 1500,
+  pageSize: 25,
+  defaultPageSize: 8,
+  exportChars: 6000,
+  defaultExportChars: 4000,
   textFragmentChars: 700,
-  serializedChars: 3000,
-  defaultReadChars: 1500,
+  serializedChars: 12000,
+  defaultReadChars: 10000,
+  overviewLabelChars: 60,
 });
 
-const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+/** Ids double as object keys in score maps, so prototype-ish names are refused. */
+export const ID_PATTERN_SOURCE = '^(?!(?:__proto__|constructor|prototype)$)[A-Za-z0-9][A-Za-z0-9_-]*$';
+const ID_PATTERN = new RegExp(ID_PATTERN_SOURCE);
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -62,11 +66,17 @@ function normalizedTimestamp(value, fallback = new Date(0).toISOString()) {
   return new Date(value).toISOString();
 }
 
+/** Clamp a finite number; anything unparseable becomes the neutral default, not the minimum. */
+function boundedNumber(value, min, max, fallback) {
+  const number = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  return typeof number === 'number' && Number.isFinite(number) ? clamp(number, min, max) : fallback;
+}
+
 function normalizedCell(value, { sparse = false } = {}) {
   if (!isRecord(value)) return sparse ? null : { score: DEFAULT_SCORE, confidence: 40, evidence: '' };
   const cell = {};
-  if (!sparse || value.score !== undefined) cell.score = clamp(value.score ?? DEFAULT_SCORE, 0, 10);
-  if (!sparse || value.confidence !== undefined) cell.confidence = clamp(value.confidence ?? 40, 0, 100);
+  if (!sparse || value.score !== undefined) cell.score = boundedNumber(value.score, 0, 10, DEFAULT_SCORE);
+  if (!sparse || value.confidence !== undefined) cell.confidence = boundedNumber(value.confidence, 0, 100, 40);
   if (!sparse || value.evidence !== undefined) cell.evidence = boundedText(value.evidence, WORKSPACE_LIMITS.evidence);
   return Object.keys(cell).length ? cell : null;
 }
@@ -199,6 +209,7 @@ export function normalizeWorkspace(value, fallback = null) {
     iterations: Math.round(clamp(rawStress.iterations, 100, 10000)),
     seed: Math.round(clamp(rawStress.seed, 1, 2147483647)),
     scenarioId: scenarioIds.has(rawStress.scenarioId) ? rawStress.scenarioId : 'base',
+    fingerprint: /^[0-9a-f]{8}$/.test(rawStress.fingerprint) ? rawStress.fingerprint : '',
     generatedAt: normalizedTimestamp(rawStress.generatedAt),
     results: rawStress.results.slice(0, options.length).flatMap((item) => {
       const record = isRecord(item) ? item : {};
@@ -287,6 +298,29 @@ export function effectiveCell(state, optionId, criterionId, scenarioId = state.a
     confidence: clamp(override.confidence ?? base.confidence ?? DEFAULT_CONFIDENCE, 0, 100),
     evidence: String(override.evidence ?? base.evidence ?? '').trim(),
   };
+}
+
+/**
+ * Write a score cell into the base case or a scenario override layer.
+ * Omitting `evidence` keeps the existing base evidence and leaves the scenario
+ * override sparse, so a numeric re-score never manufactures an evidence gap.
+ */
+export function setScoreCell(state, { optionId, criterionId, score, confidence, evidence, scenarioId = 'base' }) {
+  const cell = { score, confidence };
+  if (evidence !== undefined) cell.evidence = evidence;
+  if (!scenarioId || scenarioId === 'base') {
+    state.scores[optionId] ??= {};
+    const existing = state.scores[optionId][criterionId] ?? {};
+    state.scores[optionId][criterionId] = { ...existing, ...cell };
+    return state.scores[optionId][criterionId];
+  }
+  const scenario = state.scenarios.find((item) => item.id === scenarioId);
+  if (!scenario) throw new Error(`Unknown scenario id: ${scenarioId}`);
+  scenario.scoreOverrides ??= {};
+  scenario.scoreOverrides[optionId] ??= {};
+  const existing = scenario.scoreOverrides[optionId][criterionId] ?? {};
+  scenario.scoreOverrides[optionId][criterionId] = { ...existing, ...cell };
+  return scenario.scoreOverrides[optionId][criterionId];
 }
 
 export function rankOptions(state, scenarioId = state.activeScenarioId) {
@@ -384,6 +418,32 @@ function yieldToMain() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function hashString(text) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * Fingerprint every input the stress test depends on for a scenario: the
+ * option set, normalized weights, and effective score/confidence cells. A
+ * saved result whose fingerprint no longer matches is stale.
+ */
+export function stressFingerprint(state, scenarioId = state.activeScenarioId) {
+  const weights = normalizedWeights(state, scenarioId);
+  const payload = state.options.map((option) => [
+    option.id,
+    state.criteria.map((criterion) => {
+      const cell = effectiveCell(state, option.id, criterion.id, scenarioId);
+      return [criterion.id, Number((weights[criterion.id] ?? 0).toFixed(6)), cell.score, cell.confidence];
+    }),
+  ]);
+  return hashString(JSON.stringify(payload));
+}
+
 export async function runStressTest(state, {
   iterations = 1000,
   seed = 20260828,
@@ -395,8 +455,10 @@ export async function runStressTest(state, {
 } = {}) {
   const safeIterations = Math.round(clamp(iterations, 100, 10000));
   const safeChunkSize = Math.round(clamp(chunkSize, 10, 500));
+  const safeScenarioId = scenarioId || 'base';
   const random = mulberry32(Number(seed) || 1);
-  const baseWeights = normalizedWeights(state, scenarioId);
+  const baseWeights = normalizedWeights(state, safeScenarioId);
+  const fingerprint = stressFingerprint(state, safeScenarioId);
   const results = Object.fromEntries(state.options.map((option) => [option.id, {
     optionId: option.id,
     option: option.name,
@@ -405,8 +467,13 @@ export async function runStressTest(state, {
   }]));
 
   if (!state.options.length || !state.criteria.length) {
-    return { iterations: safeIterations, seed, scenarioId, results: [] };
+    return { iterations: safeIterations, seed: Number(seed) || 1, scenarioId: safeScenarioId, fingerprint, generatedAt: new Date().toISOString(), results: [] };
   }
+
+  const cells = state.options.map((option) => state.criteria.map((criterion) => {
+    const cell = effectiveCell(state, option.id, criterion.id, safeScenarioId);
+    return { score: cell.score, uncertainty: (1 - cell.confidence / 100) * scoreVolatility };
+  }));
 
   throwIfAborted(signal);
   for (let iteration = 0; iteration < safeIterations; iteration += 1) {
@@ -425,20 +492,19 @@ export async function runStressTest(state, {
 
     let bestId = null;
     let bestScore = -Infinity;
-    for (const option of state.options) {
+    state.options.forEach((option, optionIndex) => {
       let total = 0;
-      for (const criterion of state.criteria) {
-        const cell = effectiveCell(state, option.id, criterion.id, scenarioId);
-        const uncertainty = (1 - cell.confidence / 100) * scoreVolatility;
-        const simulatedScore = clamp(cell.score + normal(random) * uncertainty, 0, 10);
+      state.criteria.forEach((criterion, criterionIndex) => {
+        const cell = cells[optionIndex][criterionIndex];
+        const simulatedScore = clamp(cell.score + normal(random) * cell.uncertainty, 0, 10);
         total += simulatedScore * perturbedWeights[criterion.id];
-      }
+      });
       results[option.id].scores.push(total);
       if (total > bestScore) {
         bestScore = total;
         bestId = option.id;
       }
-    }
+    });
     results[bestId].wins += 1;
 
     if ((iteration + 1) % safeChunkSize === 0 && iteration + 1 < safeIterations) {
@@ -463,10 +529,18 @@ export async function runStressTest(state, {
   return {
     iterations: safeIterations,
     seed: Number(seed) || 1,
-    scenarioId: scenarioId || 'base',
+    scenarioId: safeScenarioId,
+    fingerprint,
     generatedAt: new Date().toISOString(),
     results: summary,
   };
+}
+
+/** A saved stress test is stale once any input it depended on has changed. */
+export function isStressTestStale(state, result = state.lastStressTest) {
+  if (!result?.results?.length) return false;
+  if (!result.fingerprint) return true;
+  return stressFingerprint(state, result.scenarioId) !== result.fingerprint;
 }
 
 export function summarizeWorkspace(state) {
@@ -504,25 +578,58 @@ export function summarizeWorkspace(state) {
   };
 }
 
-function page(items, section, cursor = 0, pageSize = 6) {
+/**
+ * Return one bounded page of `items`. `pageSize` is an upper bound: the page
+ * shrinks item by item until it fits the serialized budget, so following
+ * nextCursor always recovers the complete collection.
+ */
+function page(items, section, state, cursor = 0, pageSize = TOOL_RESULT_LIMITS.defaultPageSize) {
   const safeCursor = Math.round(clamp(cursor, 0, items.length));
-  const safePageSize = Math.round(clamp(pageSize, 1, TOOL_RESULT_LIMITS.pageSize));
-  const end = Math.min(items.length, safeCursor + safePageSize);
-  const result = {
-    section,
-    items: deepClone(items.slice(safeCursor, end)),
-    page: {
-      cursor: safeCursor,
-      pageSize: safePageSize,
-      total: items.length,
-      nextCursor: end < items.length ? end : null,
-      hasMore: end < items.length,
-    },
-  };
-  if (JSON.stringify(result).length > TOOL_RESULT_LIMITS.serializedChars) {
-    throw new RangeError(`The ${section} page exceeded the ${TOOL_RESULT_LIMITS.serializedChars}-character result budget.`);
+  const requested = Math.round(clamp(pageSize, 1, TOOL_RESULT_LIMITS.pageSize));
+  let count = Math.min(items.length - safeCursor, requested);
+  let result;
+  do {
+    const end = safeCursor + count;
+    result = {
+      section,
+      scenarioId: state.activeScenarioId || 'base',
+      items: deepClone(items.slice(safeCursor, end)),
+      page: {
+        cursor: safeCursor,
+        pageSize: requested,
+        returned: count,
+        total: items.length,
+        nextCursor: end < items.length ? end : null,
+        hasMore: end < items.length,
+      },
+    };
+    if (JSON.stringify(result).length <= TOOL_RESULT_LIMITS.serializedChars) return result;
+    count -= 1;
+  } while (count > 0);
+  throw new RangeError(`A single ${section} item exceeded the ${TOOL_RESULT_LIMITS.serializedChars}-character result budget.`);
+}
+
+function overviewLabel(value) {
+  const text = String(value ?? '');
+  const limit = TOOL_RESULT_LIMITS.overviewLabelChars;
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+}
+
+function matrixRows(state) {
+  const rows = [];
+  for (const option of state.options) {
+    for (const criterion of state.criteria) {
+      const cell = effectiveCell(state, option.id, criterion.id);
+      rows.push({
+        optionId: option.id,
+        criterionId: criterion.id,
+        score: cell.score,
+        confidence: cell.confidence,
+        hasEvidence: cell.evidence.length > 0,
+      });
+    }
   }
-  return result;
+  return rows;
 }
 
 function textFragments(value, maximum = TOOL_RESULT_LIMITS.textFragmentChars) {
@@ -585,6 +692,7 @@ export const WORKSPACE_READ_SECTIONS = Object.freeze([
   'brief',
   'options',
   'criteria',
+  'matrix',
   'evidence',
   'assumptions',
   'scenarios',
@@ -594,19 +702,33 @@ export const WORKSPACE_READ_SECTIONS = Object.freeze([
   'activity',
 ]);
 
-/** Return one bounded page. Following nextCursor exposes every stored item. */
+/**
+ * Return one bounded page of a single section. Sections paginate
+ * independently; a null nextCursor means that section is fully read.
+ */
 export function readWorkspacePage(state, {
   section = 'overview',
   cursor = 0,
-  pageSize = 6,
+  pageSize = TOOL_RESULT_LIMITS.defaultPageSize,
 } = {}) {
   if (!WORKSPACE_READ_SECTIONS.includes(section)) throw new RangeError(`Unknown workspace section: ${section}`);
+  const scenarioId = state.activeScenarioId || 'base';
   if (section === 'overview') {
+    const weights = normalizedWeights(state);
     const result = {
       section,
+      scenarioId,
       workspace: summarizeWorkspace(state),
+      ranking: rankOptions(state).map(({ optionId, option, score, confidence }) => ({
+        optionId, option: overviewLabel(option), score, confidence,
+      })),
+      criteria: state.criteria.map((criterion) => ({
+        id: criterion.id,
+        name: overviewLabel(criterion.name),
+        normalizedWeight: Number((weights[criterion.id] ?? 0).toFixed(4)),
+      })),
       availableSections: [...WORKSPACE_READ_SECTIONS],
-      page: { cursor: 0, pageSize: 1, total: 1, nextCursor: null, hasMore: false },
+      page: { cursor: 0, pageSize: 1, returned: 1, total: 1, nextCursor: null, hasMore: false },
     };
     if (JSON.stringify(result).length > TOOL_RESULT_LIMITS.defaultReadChars) {
       throw new RangeError(`The overview exceeded the ${TOOL_RESULT_LIMITS.defaultReadChars}-character default read budget.`);
@@ -617,19 +739,25 @@ export function readWorkspacePage(state, {
   if (section === 'brief') {
     return page(Object.entries(state.brief).flatMap(([field, value]) => (
       fragmentRows({}, field, value)
-    )), section, cursor, pageSize);
+    )), section, state, cursor, pageSize);
   }
 
   if (section === 'options') {
     const rankedById = new Map(rankOptions(state).map((item, index) => [item.optionId, { rank: index + 1, score: item.score, confidence: item.confidence }]));
-    return page(state.options.map((option) => ({ ...deepClone(option), ...rankedById.get(option.id) })), section, cursor, pageSize);
+    return page(state.options.map((option) => ({ ...deepClone(option), ...rankedById.get(option.id) })), section, state, cursor, pageSize);
   }
   if (section === 'criteria') {
     const weights = normalizedWeights(state);
-    return page(state.criteria.map((criterion) => ({ ...deepClone(criterion), normalizedWeight: weights[criterion.id] ?? 0 })), section, cursor, pageSize);
+    const scenario = getScenario(state);
+    return page(state.criteria.map((criterion) => ({
+      ...deepClone(criterion),
+      effectiveWeight: scenario?.weightOverrides?.[criterion.id] ?? criterion.weight,
+      normalizedWeight: weights[criterion.id] ?? 0,
+    })), section, state, cursor, pageSize);
   }
-  if (section === 'evidence') return page(evidenceRows(state), section, cursor, pageSize);
-  if (section === 'assumptions') return page(state.assumptions, section, cursor, pageSize);
+  if (section === 'matrix') return page(matrixRows(state), section, state, cursor, pageSize);
+  if (section === 'evidence') return page(evidenceRows(state), section, state, cursor, pageSize);
+  if (section === 'assumptions') return page(state.assumptions, section, state, cursor, pageSize);
   if (section === 'scenarios') {
     return page(state.scenarios.flatMap((scenario) => fragmentRows({
       id: scenario.id,
@@ -637,23 +765,23 @@ export function readWorkspacePage(state, {
       weightOverrideCount: Object.keys(scenario.weightOverrides ?? {}).length,
       scoreOverrideCount: Object.values(scenario.scoreOverrides ?? {})
         .reduce((total, cells) => total + Object.keys(cells ?? {}).length, 0),
-    }, 'description', scenario.description)), section, cursor, pageSize);
+    }, 'description', scenario.description)), section, state, cursor, pageSize);
   }
-  if (section === 'scenario-overrides') return page(scenarioOverrideRows(state), section, cursor, pageSize);
+  if (section === 'scenario-overrides') return page(scenarioOverrideRows(state), section, state, cursor, pageSize);
   if (section === 'recommendation') {
     const recommendation = state.committedDecision
       ? { kind: 'committed', ...state.committedDecision }
       : state.stagedRecommendation
         ? { kind: 'staged', ...state.stagedRecommendation }
         : null;
-    if (!recommendation) return page([], section, cursor, pageSize);
+    if (!recommendation) return page([], section, state, cursor, pageSize);
     const field = recommendation.kind === 'committed' ? 'note' : 'rationale';
     const { [field]: longText, ...metadata } = recommendation;
-    return page(fragmentRows(metadata, field, longText), section, cursor, pageSize);
+    return page(fragmentRows(metadata, field, longText), section, state, cursor, pageSize);
   }
   if (section === 'stress-test') {
     const test = state.lastStressTest;
-    if (!test) return page([], section, cursor, pageSize);
+    if (!test) return page([], section, state, cursor, pageSize);
     const rows = [{
       kind: 'metadata',
       iterations: test.iterations,
@@ -661,28 +789,33 @@ export function readWorkspacePage(state, {
       scenarioId: test.scenarioId,
       generatedAt: test.generatedAt,
     }, ...test.results.map((result) => ({ kind: 'result', ...deepClone(result) }))];
-    return page(rows, section, cursor, pageSize);
+    return page(rows, section, state, cursor, pageSize);
   }
-  return page(state.activity ?? [], section, cursor, pageSize);
+  return page(state.activity ?? [], section, state, cursor, pageSize);
 }
 
-export function findEvidenceGapsPage(state, { cursor = 0, pageSize = 8 } = {}) {
-  return page(findEvidenceGaps(state), 'evidence-gaps', cursor, pageSize);
+export function findEvidenceGapsPage(state, { cursor = 0, pageSize = TOOL_RESULT_LIMITS.defaultPageSize } = {}) {
+  return page(findEvidenceGaps(state), 'evidence-gaps', state, cursor, pageSize);
+}
+
+/** Collapse line breaks so workspace text cannot start a new Markdown block. */
+function inline(value) {
+  return String(value ?? '').replace(/\s*\r?\n\s*/g, ' ').trim();
 }
 
 function escapeTable(value) {
-  return String(value ?? '').replaceAll('|', '\\|').replaceAll('\n', ' ');
+  return inline(value).replaceAll('|', '\\|');
 }
 
 export function exportMarkdown(state) {
   const ranking = rankOptions(state);
   const scenario = getScenario(state);
   const lines = [
-    `# ${state.brief.title || 'Untitled decision'}`,
+    `# ${inline(state.brief.title) || 'Untitled decision'}`,
     '',
-    `**Question:** ${state.brief.question || 'Not defined'}`,
+    `**Question:** ${inline(state.brief.question) || 'Not defined'}`,
     '',
-    `**Active scenario:** ${scenario?.name ?? 'Base case'}`,
+    `**Active scenario:** ${inline(scenario?.name) || 'Base case'}`,
     '',
   ];
 
@@ -701,17 +834,17 @@ export function exportMarkdown(state) {
 
   lines.push('', '## Evidence matrix', '');
   for (const option of state.options) {
-    lines.push(`### ${option.name}`, '');
+    lines.push(`### ${inline(option.name)}`, '');
     for (const criterion of state.criteria) {
       const cell = effectiveCell(state, option.id, criterion.id);
-      lines.push(`- **${criterion.name}:** ${cell.score.toFixed(1)}/10, ${cell.confidence.toFixed(0)}% confidence${cell.evidence ? ` — ${cell.evidence}` : ' — evidence not recorded'}`);
+      lines.push(`- **${inline(criterion.name)}:** ${cell.score.toFixed(1)}/10, ${cell.confidence.toFixed(0)}% confidence${cell.evidence ? ` — ${inline(cell.evidence)}` : ' — evidence not recorded'}`);
     }
     lines.push('');
   }
 
   lines.push('## Assumptions', '');
   if (state.assumptions.length) {
-    state.assumptions.forEach((assumption) => lines.push(`- [${assumption.status === 'validated' ? 'x' : ' '}] ${assumption.text} (${assumption.impact} impact)`));
+    state.assumptions.forEach((assumption) => lines.push(`- [${assumption.status === 'validated' ? 'x' : ' '}] ${inline(assumption.text)} (${assumption.impact} impact)`));
   } else {
     lines.push('- No assumptions recorded.');
   }
@@ -719,14 +852,16 @@ export function exportMarkdown(state) {
 
   if (state.stagedRecommendation) {
     const option = state.options.find((item) => item.id === state.stagedRecommendation.optionId);
-    lines.push('## Staged recommendation', '', `**${option?.name ?? 'Unknown option'}**`, '', state.stagedRecommendation.rationale, '');
+    lines.push('## Staged recommendation', '', `**${inline(option?.name) || 'Unknown option'}**`, '', state.stagedRecommendation.rationale, '');
   }
   if (state.committedDecision) {
     const option = state.options.find((item) => item.id === state.committedDecision.optionId);
-    lines.push('## Human-committed decision', '', `**${option?.name ?? 'Unknown option'}**`, '', state.committedDecision.note || '', '', `Committed at ${state.committedDecision.committedAt}.`, '');
+    lines.push('## Human-committed decision', '', `**${inline(option?.name) || 'Unknown option'}**`, '', state.committedDecision.note || '', '', `Committed at ${state.committedDecision.committedAt}.`, '');
   }
 
-  const exportedAt = normalizedTimestamp(state.activity?.[0]?.at);
+  // Free-form prose blocks (context, constraints, rationale, note) may keep
+  // their line breaks; only single-line constructs above are collapsed.
+  const exportedAt = normalizedTimestamp(state.activity?.[0]?.at, new Date().toISOString());
   lines.push('---', '', `Exported from Forkcast snapshot ${exportedAt}.`);
   return lines.join('\n');
 }

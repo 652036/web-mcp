@@ -1,4 +1,4 @@
-const CACHE = 'forkcast-shell-v3';
+const CACHE = 'forkcast-shell-v4';
 const APP_SHELL = [
   './',
   './index.html',
@@ -9,21 +9,36 @@ const APP_SHELL = [
   './src/data.js',
   './src/engine.js',
   './src/storage.js',
+  './src/tools.js',
   './src/webmcp.js',
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(APP_SHELL)));
+  // Activate immediately, but do not claim already-open pages: a page keeps the
+  // worker (and module set) it booted with until it navigates, so a deployment
+  // never mixes old and new modules inside one session.
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
-      .then(() => self.clients.claim()),
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))),
   );
 });
+
+function networkFirst(request, cacheKey = request) {
+  return fetch(request)
+    .then((response) => {
+      if (response.ok) {
+        const copy = response.clone();
+        caches.open(CACHE).then((cache) => cache.put(cacheKey, copy));
+      }
+      return response;
+    })
+    .catch(() => caches.match(cacheKey).then((cached) => cached ?? Response.error()));
+}
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
@@ -31,25 +46,11 @@ self.addEventListener('fetch', (event) => {
   if (requestUrl.origin !== self.location.origin) return;
 
   if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put('./index.html', copy));
-          return response;
-        })
-        .catch(() => caches.match('./index.html')),
-    );
+    event.respondWith(networkFirst(event.request, './index.html'));
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request).then((response) => {
-      if (response.ok) {
-        const copy = response.clone();
-        caches.open(CACHE).then((cache) => cache.put(event.request, copy));
-      }
-      return response;
-    })),
-  );
+  // Same-origin scripts and styles are network-first so a redeploy reaches
+  // returning visitors on their next load; the cache is only an offline fallback.
+  event.respondWith(networkFirst(event.request));
 });

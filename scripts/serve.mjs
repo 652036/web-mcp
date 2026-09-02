@@ -20,7 +20,7 @@ export function headers(contentType) {
   return {
     'Content-Type': contentType,
     'Cache-Control': 'no-cache',
-    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
     'Origin-Agent-Cluster': '?1',
     'Permissions-Policy': 'tools=(self)',
     'X-Content-Type-Options': 'nosniff',

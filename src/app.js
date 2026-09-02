@@ -2,23 +2,31 @@ import {
   deepClone,
   effectiveCell,
   exportMarkdown,
-  exportMarkdownPage,
   findEvidenceGaps,
-  findEvidenceGapsPage,
   getScenario,
+  isStressTestStale,
   makeId,
   normalizeWorkspace,
   normalizedWeights,
   rankOptions,
-  readWorkspacePage,
   runStressTest,
+  setScoreCell,
   summarizeWorkspace,
   WORKSPACE_LIMITS,
-  WORKSPACE_READ_SECTIONS,
 } from './engine.js';
 import { createBlankWorkspace, examples, getExample } from './data.js';
 import { commitWorkspaceSnapshot, restoreWorkspace } from './storage.js';
-import { installWebMCP, schemas, uninstallWebMCP } from './webmcp.js';
+import {
+  createTools,
+  describeRemoval,
+  ensureCapacity,
+  neutralCells,
+  removeOption,
+  requireCriterion,
+  requireOption,
+  snapshotOption,
+} from './tools.js';
+import { installWebMCP, uninstallWebMCP } from './webmcp.js';
 
 const STORAGE_KEY = 'forkcast.workspace.v1';
 const THEME_KEY = 'forkcast.theme';
@@ -34,6 +42,7 @@ const stateful = {
   workspace: restored.workspace,
   undoStack: [],
   webmcp: null,
+  stressRun: null,
 };
 
 function text(value) {
@@ -61,6 +70,13 @@ function node(tag, attributes = {}, children = []) {
   return element;
 }
 
+/** CSSOM writes are allowed under a strict style-src; inline style attributes are not. */
+function bar(percent) {
+  const fill = document.createElement('span');
+  fill.style.width = `${Math.min(100, Math.max(0, Number(percent) || 0))}%`;
+  return fill;
+}
+
 function formatDate(value) {
   try {
     return new Intl.DateTimeFormat(undefined, {
@@ -77,18 +93,6 @@ function optionById(id) {
 
 function criterionById(id) {
   return stateful.workspace.criteria.find((criterion) => criterion.id === id);
-}
-
-function requireOption(id) {
-  const option = optionById(id);
-  if (!option) throw new Error(`Unknown option id: ${id}`);
-  return option;
-}
-
-function requireCriterion(id) {
-  const criterion = criterionById(id);
-  if (!criterion) throw new Error(`Unknown criterion id: ${id}`);
-  return criterion;
 }
 
 function ensureMutable() {
@@ -125,12 +129,6 @@ function commitState(workspace, history) {
   stateful.undoStack = committed.history;
 }
 
-function ensureCapacity(collection, maximum, label) {
-  if (collection.length >= maximum) {
-    throw new RangeError(`${label} limit reached (${maximum}). Remove or reuse an existing item before adding another.`);
-  }
-}
-
 function mutate(message, updater, { actor = 'agent', allowCommitted = false } = {}) {
   if (!allowCommitted) ensureMutable();
   const previous = deepClone(stateful.workspace);
@@ -155,7 +153,7 @@ function replaceWorkspace(workspace, message) {
 
 function undoLast(actor = 'human') {
   const entry = stateful.undoStack.at(-1);
-  if (!entry) throw new Error('There is no change to undo.');
+  if (!entry) throw new Error(actor === 'agent' ? 'There is no agent change to undo.' : 'There is no change to undo.');
   if (actor === 'agent' && entry.actor !== 'agent') {
     throw new Error('The latest change belongs to the human and cannot be undone by an agent.');
   }
@@ -259,7 +257,7 @@ function renderRanking() {
           node('span', { className: 'score-number' }, item.score.toFixed(2)),
         ]),
         node('div', { className: 'score-track', role: 'img', ariaLabel: `${item.option} score ${item.score.toFixed(2)} out of 10` },
-          node('span', { style: `width:${Math.min(100, (item.score / max) * 100)}%` })),
+          bar((item.score / max) * 100)),
         node('div', { className: 'ranking-row__meta' }, [
           node('span', {}, `${item.confidence.toFixed(0)}% confidence`),
           node('span', {}, `${uncertainty.toFixed(0)}% unresolved`),
@@ -308,6 +306,8 @@ function renderMatrix() {
     return;
   }
 
+  const scenario = getScenario(stateful.workspace);
+  table.append(node('caption', { className: 'sr-only' }, `Evidence matrix for ${scenario ? `scenario “${scenario.name}”` : 'the base case'}: rows are criteria with normalized weights, columns are options; each cell shows score out of 10, confidence, and whether evidence is recorded.`));
   const headRow = node('tr', {}, [node('th', { scope: 'col' }, 'Criterion')]);
   options.forEach((option) => headRow.append(node('th', { scope: 'col' }, option.name)));
   table.append(node('thead', {}, headRow));
@@ -385,13 +385,27 @@ function renderScenarios() {
 function renderStressTest() {
   const result = stateful.workspace.lastStressTest;
   const container = byId('stress-results');
+  const button = byId('run-stress-button');
+  const running = Boolean(stateful.stressRun);
+  button.textContent = running ? 'Cancel' : 'Run 2k';
+  button.setAttribute('aria-pressed', String(running));
+  button.disabled = Boolean(stateful.workspace.committedDecision) && !running;
+  container.setAttribute('aria-busy', String(running));
   container.replaceChildren();
   if (!result?.results?.length) {
     container.append(node('div', { className: 'stress-empty' }, [
       node('span', { className: 'stress-empty__mark' }, '±'),
-      node('p', {}, 'Run a seeded simulation to see whether the leading option survives plausible changes in weights and uncertain scores.'),
+      node('p', {}, running
+        ? 'Running 2,000 seeded simulations…'
+        : 'Run a seeded simulation to see whether the leading option survives plausible changes in weights and uncertain scores.'),
     ]));
+    byId('stress-meta').textContent = '';
     return;
+  }
+  const stale = isStressTestStale(stateful.workspace, result);
+  container.classList.toggle('stress-results--stale', stale);
+  if (stale) {
+    container.append(node('p', { className: 'stress-stale', role: 'status' }, 'Stale: scores, weights, or options changed after this run. Run again to refresh.'));
   }
   result.results.forEach((item, index) => {
     container.append(node('article', { className: `stress-row${index === 0 ? ' stress-row--leader' : ''}` }, [
@@ -399,11 +413,12 @@ function renderStressTest() {
         node('strong', {}, item.option),
         node('span', {}, `${item.winRate.toFixed(1)}% wins`),
       ]),
-      node('div', { className: 'win-track', role: 'img', ariaLabel: `${item.option} wins ${item.winRate.toFixed(1)} percent of simulations` }, node('span', { style: `width:${item.winRate}%` })),
+      node('div', { className: 'win-track', role: 'img', ariaLabel: `${item.option} wins ${item.winRate.toFixed(1)} percent of simulations` }, bar(item.winRate)),
       node('small', {}, `Expected ${item.expectedScore.toFixed(2)} · P10–P90 ${item.p10.toFixed(2)}–${item.p90.toFixed(2)}`),
     ]));
   });
-  byId('stress-meta').textContent = `${result.iterations.toLocaleString()} simulations · seed ${result.seed}`;
+  const scenarioName = getScenario(stateful.workspace, result.scenarioId)?.name ?? 'Base case';
+  byId('stress-meta').textContent = `${result.iterations.toLocaleString()} simulations · seed ${result.seed} · ${scenarioName}${running ? ' · running a new run…' : ''}`;
 }
 
 function renderGate() {
@@ -418,6 +433,9 @@ function renderGate() {
   byId('stage-recommendation-button').disabled = Boolean(committedDecision) || !options.length;
 
   const review = byId('staged-review');
+  const previousCheck = byId('human-review-check');
+  const stagedKey = stagedRecommendation ? `${stagedRecommendation.optionId}@${stagedRecommendation.stagedAt}` : '';
+  const keepChecked = Boolean(previousCheck?.checked) && previousCheck.dataset.staged === stagedKey;
   review.replaceChildren();
   if (committedDecision) {
     const option = optionById(committedDecision.optionId);
@@ -438,7 +456,7 @@ function renderGate() {
       node('p', {}, stagedRecommendation.rationale),
       node('div', { className: 'gate-actions' }, [
         node('label', { className: 'review-check' }, [
-          node('input', { id: 'human-review-check', type: 'checkbox' }),
+          node('input', { id: 'human-review-check', type: 'checkbox', checked: keepChecked, dataset: { staged: stagedKey } }),
           node('span', {}, 'I reviewed the evidence, assumptions, and scenario.'),
         ]),
         node('button', { className: 'button button--primary', type: 'button', dataset: { action: 'commit-decision' } }, 'Commit decision'),
@@ -471,7 +489,29 @@ function renderToolLab() {
   updateToolHelp();
 }
 
+/**
+ * Rendering replaces subtrees wholesale, so remember which control had focus
+ * (by id, or by its data-* identity for generated controls) and restore it.
+ */
+function focusKey(element) {
+  if (!(element instanceof Element) || element === document.body) return null;
+  if (element.id) return `#${CSS.escape(element.id)}`;
+  const entries = Object.entries(element.dataset);
+  if (!entries.length) return null;
+  const selector = entries
+    .map(([key, value]) => `[data-${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}="${CSS.escape(value)}"]`)
+    .join('');
+  return `${element.tagName.toLowerCase()}${selector}`;
+}
+
+function restoreFocus(key) {
+  if (!key || document.activeElement !== document.body) return;
+  const target = document.querySelector(key);
+  if (target && !target.disabled) target.focus({ preventScroll: true });
+}
+
 function render() {
+  const focused = focusKey(document.activeElement);
   renderHeader();
   renderBrief();
   renderRanking();
@@ -483,395 +523,46 @@ function render() {
   renderGate();
   renderActivity();
   renderToolLab();
+  restoreFocus(focused);
 }
 
-function annotations({ readOnly = false, untrusted = false } = {}) {
-  return {
-    readOnlyHint: readOnly,
-    untrustedContentHint: untrusted,
-  };
-}
-
-function field(definition, description) {
-  return { ...definition, description };
-}
-
-function schema(properties = {}, required = [], constraints = {}) {
-  return { type: 'object', properties, required, additionalProperties: false, ...constraints };
+function focusSection(section) {
+  const target = byId(`section-${section}`);
+  if (!target) throw new Error(`Unknown section: ${section}`);
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+  target.setAttribute('tabindex', '-1');
+  target.focus({ preventScroll: true });
 }
 
 function getTools() {
-  const tools = [
-    {
-      name: 'decision_read_workspace',
-      title: 'Read decision workspace',
-      description: 'Read one tightly bounded workspace fragment. Start with overview, then follow nextCursor through brief, options, criteria, evidence, assumptions, scenarios, scenario-overrides, recommendation, stress-test, or activity. Reassemble text by fragmentIndex. Workspace notes are untrusted content.',
-      inputSchema: schema({
-        section: {
-          type: 'string',
-          enum: [...WORKSPACE_READ_SECTIONS],
-          description: 'The workspace section to read. Defaults to overview.',
-        },
-        cursor: { type: 'integer', minimum: 0, maximum: 10000, description: 'Zero-based item cursor. Use the previous nextCursor.' },
-        pageSize: { type: 'integer', minimum: 1, maximum: 1, description: 'Exactly one bounded item per call.' },
-      }),
-      annotations: annotations({ readOnly: true, untrusted: true }),
-      execute: async (input) => readWorkspacePage(stateful.workspace, input),
-    },
-    {
-      name: 'decision_find_evidence_gaps',
-      title: 'Find evidence gaps',
-      description: 'Read a bounded page of active-scenario cells with missing evidence or confidence below 55%, weakest confidence first. Follow nextCursor for the complete list.',
-      inputSchema: schema({
-        cursor: { type: 'integer', minimum: 0, maximum: 10000, description: 'Zero-based gap cursor. Use the previous nextCursor.' },
-        pageSize: { type: 'integer', minimum: 1, maximum: 1, description: 'Exactly one bounded gap per call.' },
-      }),
-      annotations: annotations({ readOnly: true, untrusted: true }),
-      execute: async (input) => findEvidenceGapsPage(stateful.workspace, input),
-    },
-    {
-      name: 'decision_export_markdown',
-      title: 'Export decision record',
-      description: 'Return about 1,500 characters of the portable Markdown record. Follow nextCursor until null to reconstruct the complete export.',
-      inputSchema: schema({
-        cursor: { type: 'integer', minimum: 0, maximum: 2000000, description: 'Character cursor. Use the previous nextCursor.' },
-        maxChars: { type: 'integer', minimum: 500, maximum: 1800, description: 'Requested Markdown characters, automatically reduced if JSON escaping would exceed 3,000 serialized characters. Defaults to 1,500.' },
-      }),
-      annotations: annotations({ readOnly: true, untrusted: true }),
-      execute: async (input) => exportMarkdownPage(stateful.workspace, input),
-    },
-    {
-      name: 'decision_focus_view',
-      title: 'Focus a visible section',
-      description: 'Bring a visible Forkcast section into view for the human. Valid sections are brief, ranking, matrix, assumptions, scenarios, stress, gate, and activity.',
-      inputSchema: schema({
-        section: {
-          type: 'string',
-          enum: ['brief', 'ranking', 'matrix', 'assumptions', 'scenarios', 'stress', 'gate', 'activity'],
-          description: 'The visible workspace section to scroll to and focus.',
-        },
-      }, ['section']),
-      annotations: annotations(),
-      execute: async ({ section }) => {
-        const target = byId(`section-${section}`);
-        const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-        target?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
-        target?.setAttribute('tabindex', '-1');
-        target?.focus({ preventScroll: true });
-        return { focused: section };
-      },
-    },
-  ];
+  return createTools({
+    getWorkspace: () => stateful.workspace,
+    getUndoStack: () => stateful.undoStack,
+    mutate,
+    undo: undoLast,
+    focus: focusSection,
+  });
+}
 
-  if (stateful.workspace.committedDecision) return tools;
+const NATIVE_HINT = 'Enable chrome://flags/#enable-webmcp-testing (Chrome 150+) or open in the ChatGPT in-app browser, then reload.';
 
-  tools.push(
-    {
-      name: 'decision_define_brief',
-      title: 'Define the decision brief',
-      description: 'Update one or more fields in the decision brief. Values remain visible and editable in the page.',
-      inputSchema: schema({
-        title: { type: 'string', minLength: 1, maxLength: 120, description: 'A short name for this decision workspace.' },
-        question: { type: 'string', minLength: 1, maxLength: 300, description: 'The concrete decision question to answer.' },
-        context: { type: 'string', maxLength: 4000, description: 'Relevant background, stakeholders, and timing.' },
-        constraints: { type: 'string', maxLength: 4000, description: 'Non-negotiable limits or requirements.' },
-      }, [], { minProperties: 1 }),
-      annotations: annotations({ untrusted: true }),
-      execute: async (input) => mutate('Agent updated the decision brief.', (workspace) => {
-        workspace.brief = { ...workspace.brief, ...input };
-      }),
-    },
-    {
-      name: 'decision_add_option',
-      title: 'Add a decision option',
-      description: 'Add a viable alternative. New score cells start neutral at 5/10 with 40% confidence so uncertainty remains visible.',
-      inputSchema: schema({
-        name: field(schemas.shortText, 'The concise name of the alternative.'),
-        description: { type: 'string', maxLength: 1000, description: 'What this alternative entails and how it differs.' },
-      }, ['name']),
-      annotations: annotations({ untrusted: true }),
-      available: stateful.workspace.options.length < WORKSPACE_LIMITS.options,
-      execute: async ({ name, description = '' }) => {
-        const id = makeId('option');
-        mutate(`Agent added option “${name}”.`, (workspace) => {
-          ensureCapacity(workspace.options, WORKSPACE_LIMITS.options, 'Option');
-          workspace.options.push({ id, name, description });
-          workspace.scores[id] = Object.fromEntries(workspace.criteria.map((criterion) => [criterion.id, { score: 5, confidence: 40, evidence: '' }]));
-        });
-        return { optionId: id, workspace: summarizeWorkspace(stateful.workspace) };
-      },
-    },
-    {
-      name: 'decision_update_option',
-      title: 'Update a decision option',
-      description: 'Rename or clarify an existing alternative using its option id.',
-      inputSchema: schema({
-        optionId: field(schemas.id, 'The option id returned by decision_read_workspace or decision_add_option.'),
-        name: { type: 'string', minLength: 1, maxLength: 160, description: 'A replacement name for the alternative.' },
-        description: { type: 'string', maxLength: 1000, description: 'A replacement explanation of the alternative.' },
-      }, ['optionId'], { minProperties: 2 }),
-      annotations: annotations({ untrusted: true }),
-      available: stateful.workspace.options.length > 0,
-      execute: async ({ optionId, name, description }) => {
-        requireOption(optionId);
-        return mutate(`Agent updated option ${optionId}.`, (workspace) => {
-          const option = workspace.options.find((item) => item.id === optionId);
-          if (name !== undefined) option.name = name;
-          if (description !== undefined) option.description = description;
-        });
-      },
-    },
-    {
-      name: 'decision_remove_option',
-      title: 'Remove a decision option',
-      description: 'Remove an option and its scores. This destructive operation requires confirm=true and can still be undone.',
-      inputSchema: schema({
-        optionId: field(schemas.id, 'The exact option id to remove.'),
-        confirm: { type: 'boolean', description: 'Set true only after verifying the option id and visible impact.' },
-      }, ['optionId', 'confirm']),
-      annotations: annotations({ untrusted: true }),
-      available: stateful.workspace.options.length > 1,
-      execute: async ({ optionId, confirm }) => {
-        const option = requireOption(optionId);
-        if (!confirm) throw new Error('Set confirm=true after verifying the option id.');
-        if (stateful.workspace.options.length <= 1) throw new Error('A decision workspace must keep at least one option.');
-        return mutate(`Agent removed option “${option.name}”.`, (workspace) => {
-          workspace.options = workspace.options.filter((item) => item.id !== optionId);
-          delete workspace.scores[optionId];
-          workspace.scenarios.forEach((scenario) => delete scenario.scoreOverrides?.[optionId]);
-          if (workspace.stagedRecommendation?.optionId === optionId) workspace.stagedRecommendation = null;
-        });
-      },
-    },
-    {
-      name: 'decision_add_criterion',
-      title: 'Add a decision criterion',
-      description: 'Add a decision criterion with a raw weight. Existing options receive neutral score cells.',
-      inputSchema: schema({
-        name: field(schemas.shortText, 'The value or outcome used to judge every option.'),
-        description: { type: 'string', maxLength: 1000, description: 'How to interpret and score this criterion.' },
-        weight: field(schemas.weight, 'Relative importance from 0 to 100; all weights are normalized.'),
-      }, ['name', 'weight']),
-      annotations: annotations({ untrusted: true }),
-      available: stateful.workspace.criteria.length < WORKSPACE_LIMITS.criteria,
-      execute: async ({ name, description = '', weight }) => {
-        const id = makeId('criterion');
-        mutate(`Agent added criterion “${name}”.`, (workspace) => {
-          ensureCapacity(workspace.criteria, WORKSPACE_LIMITS.criteria, 'Criterion');
-          workspace.criteria.push({ id, name, description, weight });
-          workspace.options.forEach((option) => {
-            workspace.scores[option.id] ??= {};
-            workspace.scores[option.id][id] = { score: 5, confidence: 40, evidence: '' };
-          });
-        });
-        return { criterionId: id, workspace: summarizeWorkspace(stateful.workspace) };
-      },
-    },
-    {
-      name: 'decision_set_criterion_weight',
-      title: 'Set a criterion weight',
-      description: 'Set a raw criterion weight in the base case or an existing scenario. Forkcast normalizes all weights automatically.',
-      inputSchema: schema({
-        criterionId: field(schemas.id, 'The criterion id whose importance should change.'),
-        weight: field(schemas.weight, 'Relative importance from 0 to 100.'),
-        scenarioId: field(schemas.id, 'The scenario id to change, or base for the base case. Defaults to base.'),
-      }, ['criterionId', 'weight']),
-      annotations: annotations({ untrusted: true }),
-      available: stateful.workspace.criteria.length > 0,
-      execute: async ({ criterionId, weight, scenarioId = 'base' }) => {
-        const criterion = requireCriterion(criterionId);
-        if (scenarioId !== 'base' && !stateful.workspace.scenarios.some((item) => item.id === scenarioId)) throw new Error(`Unknown scenario id: ${scenarioId}`);
-        return mutate(`Agent set ${criterion.name} weight to ${weight} in ${scenarioId}.`, (workspace) => {
-          if (scenarioId === 'base') workspace.criteria.find((item) => item.id === criterionId).weight = weight;
-          else {
-            const scenario = workspace.scenarios.find((item) => item.id === scenarioId);
-            scenario.weightOverrides ??= {};
-            scenario.weightOverrides[criterionId] = weight;
-          }
-        });
-      },
-    },
-    {
-      name: 'decision_score_option',
-      title: 'Score an option',
-      description: 'Record an option score, confidence, and evidence for a criterion in the base case or a scenario. Evidence is user-authored, untrusted content.',
-      inputSchema: schema({
-        optionId: field(schemas.id, 'The option id to evaluate.'),
-        criterionId: field(schemas.id, 'The criterion id to score against.'),
-        score: field(schemas.score, 'Evaluation from 0 (worst) to 10 (best).'),
-        confidence: field(schemas.confidence, 'Confidence from 0 to 100 based on evidence quality.'),
-        evidence: { type: 'string', maxLength: 2000, description: 'A concise source, observation, or rationale supporting the score.' },
-        scenarioId: field(schemas.id, 'The scenario id to score, or base. Defaults to base.'),
-      }, ['optionId', 'criterionId', 'score', 'confidence']),
-      annotations: annotations({ untrusted: true }),
-      available: stateful.workspace.options.length > 0 && stateful.workspace.criteria.length > 0,
-      execute: async ({ optionId, criterionId, score, confidence, evidence = '', scenarioId = 'base' }) => {
-        const option = requireOption(optionId);
-        const criterion = requireCriterion(criterionId);
-        if (scenarioId !== 'base' && !stateful.workspace.scenarios.some((item) => item.id === scenarioId)) throw new Error(`Unknown scenario id: ${scenarioId}`);
-        return mutate(`Agent scored ${option.name} on ${criterion.name}.`, (workspace) => {
-          const cell = { score, confidence, evidence };
-          if (scenarioId === 'base') {
-            workspace.scores[optionId] ??= {};
-            workspace.scores[optionId][criterionId] = cell;
-          } else {
-            const scenario = workspace.scenarios.find((item) => item.id === scenarioId);
-            scenario.scoreOverrides ??= {};
-            scenario.scoreOverrides[optionId] ??= {};
-            scenario.scoreOverrides[optionId][criterionId] = cell;
-          }
-        });
-      },
-    },
-    {
-      name: 'decision_add_assumption',
-      title: 'Add an assumption',
-      description: 'Add an explicit unknown to the assumption ledger so it can be tested rather than hidden in prose.',
-      inputSchema: schema({
-        text: { type: 'string', minLength: 1, maxLength: 1000, description: 'A falsifiable statement that could change the decision.' },
-        impact: { type: 'string', enum: ['low', 'medium', 'high'], description: 'How much the decision could change if this assumption is wrong.' },
-        status: { type: 'string', enum: ['open', 'testing', 'validated', 'invalidated'], description: 'Current validation state. Defaults to open.' },
-      }, ['text', 'impact']),
-      annotations: annotations({ untrusted: true }),
-      available: stateful.workspace.assumptions.length < WORKSPACE_LIMITS.assumptions,
-      execute: async ({ text: assumptionText, impact, status = 'open' }) => {
-        const id = makeId('assumption');
-        mutate('Agent added an assumption.', (workspace) => {
-          ensureCapacity(workspace.assumptions, WORKSPACE_LIMITS.assumptions, 'Assumption');
-          workspace.assumptions.push({ id, text: assumptionText, impact, status });
-        });
-        return { assumptionId: id, workspace: summarizeWorkspace(stateful.workspace) };
-      },
-    },
-    {
-      name: 'decision_set_assumption_status',
-      title: 'Set an assumption status',
-      description: 'Update an assumption as evidence is gathered.',
-      inputSchema: schema({
-        assumptionId: field(schemas.id, 'The assumption id to update.'),
-        status: { type: 'string', enum: ['open', 'testing', 'validated', 'invalidated'], description: 'The new evidence-validation state.' },
-      }, ['assumptionId', 'status']),
-      annotations: annotations({ untrusted: true }),
-      available: stateful.workspace.assumptions.length > 0,
-      execute: async ({ assumptionId, status }) => {
-        if (!stateful.workspace.assumptions.some((item) => item.id === assumptionId)) throw new Error(`Unknown assumption id: ${assumptionId}`);
-        return mutate(`Agent marked assumption ${assumptionId} as ${status}.`, (workspace) => {
-          workspace.assumptions.find((item) => item.id === assumptionId).status = status;
-        });
-      },
-    },
-    {
-      name: 'decision_create_scenario',
-      title: 'Create a scenario',
-      description: 'Create a named what-if scenario. Weight overrides use criterion ids; score overrides can be added later with decision_score_option.',
-      inputSchema: schema({
-        name: field(schemas.shortText, 'A short, distinct name for the what-if future.'),
-        description: { type: 'string', maxLength: 2000, description: 'What changes in this future and why it matters.' },
-      }, ['name']),
-      annotations: annotations({ untrusted: true }),
-      available: stateful.workspace.scenarios.length < WORKSPACE_LIMITS.scenarios,
-      execute: async ({ name, description = '' }) => {
-        const id = makeId('scenario');
-        mutate(`Agent created scenario “${name}”.`, (workspace) => {
-          ensureCapacity(workspace.scenarios, WORKSPACE_LIMITS.scenarios, 'Scenario');
-          workspace.scenarios.push({ id, name, description, weightOverrides: {}, scoreOverrides: {} });
-        });
-        return { scenarioId: id, workspace: summarizeWorkspace(stateful.workspace) };
-      },
-    },
-    {
-      name: 'decision_activate_scenario',
-      title: 'Activate a scenario',
-      description: 'Activate the base case or a named scenario so the visible ranking and matrix reflect it.',
-      inputSchema: schema({ scenarioId: field(schemas.id, 'The scenario id to show, or base for the base case.') }, ['scenarioId']),
-      annotations: annotations({ untrusted: true }),
-      available: stateful.workspace.scenarios.length > 0 || stateful.workspace.activeScenarioId !== 'base',
-      execute: async ({ scenarioId }) => {
-        if (scenarioId !== 'base' && !stateful.workspace.scenarios.some((item) => item.id === scenarioId)) throw new Error(`Unknown scenario id: ${scenarioId}`);
-        return mutate(`Agent activated scenario ${scenarioId}.`, (workspace) => { workspace.activeScenarioId = scenarioId; });
-      },
-    },
-    {
-      name: 'decision_run_stress_test',
-      title: 'Run an uncertainty stress test',
-      description: 'Run a deterministic Monte Carlo stress test and save the visible result. Lower-confidence cells vary more widely.',
-      inputSchema: schema({
-        iterations: { type: 'integer', minimum: 100, maximum: 10000, description: 'Number of simulations. Defaults to 1000.' },
-        seed: { type: 'integer', minimum: 1, maximum: 2147483647, description: 'Random seed for a reproducible result.' },
-      }),
-      annotations: annotations({ untrusted: true }),
-      available: stateful.workspace.options.length > 0 && stateful.workspace.criteria.length > 0,
-      execute: async ({ iterations = 1000, seed = 20260828 }, { signal } = {}) => {
-        const result = await runStressTest(stateful.workspace, { iterations, seed, signal });
-        if (signal?.aborted) {
-          if (typeof signal.throwIfAborted === 'function') signal.throwIfAborted();
-          throw signal.reason ?? new DOMException('The stress test was aborted.', 'AbortError');
-        }
-        const workspace = mutate(`Agent ran ${result.iterations} stress-test simulations.`, (next) => { next.lastStressTest = result; });
-        return {
-          workspace,
-          stressTest: {
-            iterations: result.iterations,
-            seed: result.seed,
-            scenarioId: result.scenarioId,
-            generatedAt: result.generatedAt,
-            resultCount: result.results.length,
-            leader: result.results[0] ?? null,
-            resultSection: 'stress-test',
-          },
-        };
-      },
-    },
-    {
-      name: 'decision_stage_recommendation',
-      title: 'Stage a recommendation',
-      description: 'Stage an option and rationale for human review. This does not commit the decision; Forkcast intentionally exposes no final-commit tool.',
-      inputSchema: schema({
-        optionId: field(schemas.id, 'The option id to recommend for human review.'),
-        rationale: field(schemas.longText, 'Why this option leads, what remains uncertain, and what must be true.'),
-      }, ['optionId', 'rationale']),
-      annotations: annotations({ untrusted: true }),
-      available: stateful.workspace.options.length > 0,
-      execute: async ({ optionId, rationale }) => {
-        const option = requireOption(optionId);
-        return mutate(`Agent staged “${option.name}” for human review.`, (workspace) => {
-          workspace.stagedRecommendation = { optionId, rationale, stagedAt: new Date().toISOString(), actor: 'agent' };
-        });
-      },
-    },
-    {
-      name: 'decision_clear_staged_recommendation',
-      title: 'Clear the staged recommendation',
-      description: 'Clear the staged recommendation and return the workspace for more analysis.',
-      inputSchema: schemas.empty,
-      annotations: annotations({ untrusted: true }),
-      available: Boolean(stateful.workspace.stagedRecommendation),
-      execute: async () => mutate('Agent cleared the staged recommendation.', (workspace) => { workspace.stagedRecommendation = null; }),
-    },
-    {
-      name: 'decision_undo_last_change',
-      title: 'Undo the latest agent change',
-      description: 'Undo the latest workspace mutation only when it was made by an agent. Human edits and final commitment are outside this tool’s authority.',
-      inputSchema: schemas.empty,
-      annotations: annotations({ untrusted: true }),
-      available: stateful.undoStack.at(-1)?.actor === 'agent',
-      execute: async () => undoLast('agent'),
-    },
-  );
-  return tools
-    .filter(({ available = true }) => available)
-    .map(({ available: _available, ...tool }) => tool);
+function describeStatus({ mode, toolCount, reason, error }) {
+  if (mode !== 'preview') return `${toolCount} tools`;
+  if (reason === 'embedded') return `${toolCount} tools · native registration is disabled inside an embedded frame. Open Forkcast in its own tab.`;
+  if (error) return `${toolCount} tools · native registration failed: ${error}`;
+  return `${toolCount} tools · ${NATIVE_HINT}`;
 }
 
 function refreshTools() {
   stateful.webmcp = installWebMCP(getTools(), {
-    onStatus: ({ mode, toolCount, message, error }) => {
+    onStatus: (state) => {
       const badge = byId('webmcp-status');
       if (!badge) return;
-      badge.dataset.mode = mode;
-      badge.querySelector('strong').textContent = message;
-      badge.querySelector('span').textContent = error ? `${toolCount} tools · native unavailable` : `${toolCount} tools`;
-      badge.title = error ? `Native registration failed: ${error}` : '';
+      badge.dataset.mode = state.mode;
+      badge.querySelector('strong').textContent = state.message;
+      badge.querySelector('span').textContent = describeStatus(state);
+      badge.title = state.error ? `Native registration failed: ${state.error}` : '';
     },
   });
 }
@@ -903,8 +594,8 @@ function populateOptionForm(optionId = '') {
 }
 
 function populateScoreForm(optionId, criterionId) {
-  const option = requireOption(optionId);
-  const criterion = requireCriterion(criterionId);
+  const option = requireOption(stateful.workspace, optionId);
+  const criterion = requireCriterion(stateful.workspace, criterionId);
   const cell = effectiveCell(stateful.workspace, optionId, criterionId);
   byId('score-dialog-title').textContent = `${option.name} × ${criterion.name}`;
   byId('score-option-id').value = optionId;
@@ -942,7 +633,7 @@ function sampleInput(name) {
     decision_define_brief: { question: 'Which option best balances learning, reach, workload, and revenue?' },
     decision_add_option: { name: 'Partner-led launch', description: 'Launch with a specialist distribution partner.' },
     decision_update_option: { optionId, description: 'Clarified scope and operating model.' },
-    decision_remove_option: { optionId, confirm: false },
+    decision_remove_option: { optionId },
     decision_add_criterion: { name: 'Reversibility', description: 'How easily the team can change course.', weight: 20 },
     decision_set_criterion_weight: { criterionId, weight: 30, scenarioId: 'base' },
     decision_score_option: { optionId, criterionId, score: 7.5, confidence: 65, evidence: 'Pilot interviews and comparable launch data.' },
@@ -968,17 +659,77 @@ function formatToolLabError(error) {
   }, null, 2);
 }
 
-function downloadMarkdown() {
-  const markdown = exportMarkdown(stateful.workspace);
-  const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+function workspaceSlug() {
+  const slug = (stateful.workspace.brief.title || 'forkcast-decision').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return slug || 'forkcast-decision';
+}
+
+function downloadFile(contents, filename, type) {
+  const blob = new Blob([contents], { type });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
-  const slug = (stateful.workspace.brief.title || 'forkcast-decision').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   anchor.href = url;
-  anchor.download = `${slug || 'forkcast-decision'}.md`;
+  anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+function downloadMarkdown() {
+  downloadFile(exportMarkdown(stateful.workspace), `${workspaceSlug()}.md`, 'text/markdown;charset=utf-8');
   toast('Markdown decision record exported.', 'success');
+}
+
+function downloadWorkspaceJson() {
+  downloadFile(JSON.stringify(stateful.workspace, null, 2), `${workspaceSlug()}.forkcast.json`, 'application/json;charset=utf-8');
+  toast('Workspace JSON exported.', 'success');
+}
+
+async function importWorkspaceFile(file) {
+  if (!file) return;
+  let parsed;
+  try {
+    parsed = JSON.parse(await file.text());
+  } catch {
+    throw new Error(`“${file.name}” is not valid JSON.`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.options) || !Array.isArray(parsed.criteria)) {
+    throw new Error(`“${file.name}” is not a Forkcast workspace export.`);
+  }
+  const candidate = normalizeWorkspace(parsed, createBlankWorkspace());
+  if (!confirm(`Replace the current workspace with “${candidate.brief.title}” from ${file.name}? Undo remains available.`)) return;
+  replaceWorkspace(candidate, `Imported workspace from ${file.name}.`);
+  toast('Workspace imported.', 'success');
+}
+
+function showStorageNotice(message) {
+  const notice = byId('storage-notice');
+  if (!notice) return;
+  byId('storage-notice-text').textContent = message;
+  notice.hidden = false;
+}
+
+async function toggleHumanStressTest() {
+  if (stateful.stressRun) {
+    stateful.stressRun.abort(new DOMException('Stress test cancelled.', 'AbortError'));
+    return;
+  }
+  ensureMutable();
+  const controller = new AbortController();
+  stateful.stressRun = controller;
+  renderStressTest();
+  try {
+    const scenarioId = stateful.workspace.activeScenarioId || 'base';
+    const result = await runStressTest(stateful.workspace, { iterations: 2000, seed: 20260828, scenarioId, signal: controller.signal });
+    stateful.stressRun = null;
+    const scenario = getScenario(stateful.workspace, scenarioId);
+    mutate(`Human ran ${result.iterations} stress-test simulations on ${scenario ? `scenario “${scenario.name}”` : 'the base case'}.`, (workspace) => { workspace.lastStressTest = result; }, { actor: 'human' });
+    toast('Stress test complete.', 'success');
+  } catch (error) {
+    stateful.stressRun = null;
+    renderStressTest();
+    if (error?.name === 'AbortError') toast('Stress test cancelled.', 'default');
+    else throw error;
+  }
 }
 
 function bindSubmit(id, handler) {
@@ -1021,14 +772,18 @@ function bindEvents() {
         byId('scenario-form').reset();
         openDialog('scenario-dialog');
       } else if (action === 'run-stress') {
-        const result = await runStressTest(stateful.workspace, { iterations: 2000, seed: 20260828 });
-        mutate(`Human ran ${result.iterations} stress-test simulations.`, (workspace) => { workspace.lastStressTest = result; }, { actor: 'human' });
-        toast('Stress test complete.', 'success');
+        await toggleHumanStressTest();
       } else if (action === 'open-tool-lab') {
         renderToolLab();
         openDialog('tool-dialog');
       } else if (action === 'export') {
         downloadMarkdown();
+      } else if (action === 'export-json') {
+        downloadWorkspaceJson();
+      } else if (action === 'import-json') {
+        byId('import-file').click();
+      } else if (action === 'dismiss-notice') {
+        byId('storage-notice').hidden = true;
       } else if (action === 'undo') {
         undoLast('human');
         toast('Latest change undone.', 'success');
@@ -1061,6 +816,16 @@ function bindEvents() {
     }
   });
 
+  byId('import-file').addEventListener('change', async (event) => {
+    const [file] = event.target.files ?? [];
+    event.target.value = '';
+    try {
+      await importWorkspaceFile(file);
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
+
   byId('example-select').addEventListener('change', (event) => {
     const key = event.target.value;
     if (!key) return;
@@ -1074,7 +839,8 @@ function bindEvents() {
 
   byId('scenario-select').addEventListener('change', (event) => {
     try {
-      mutate(`Human activated scenario ${event.target.value}.`, (workspace) => { workspace.activeScenarioId = event.target.value; }, { actor: 'human' });
+      const scenario = getScenario(stateful.workspace, event.target.value);
+      mutate(`Human activated ${scenario ? `scenario “${scenario.name}”` : 'the base case'}.`, (workspace) => { workspace.activeScenarioId = event.target.value; }, { actor: 'human' });
     } catch (error) {
       toast(error.message, 'error');
     }
@@ -1138,7 +904,7 @@ function bindEvents() {
       mutate(`Human added option “${name}”.`, (workspace) => {
         ensureCapacity(workspace.options, WORKSPACE_LIMITS.options, 'Option');
         workspace.options.push({ id: newId, name, description });
-        workspace.scores[newId] = Object.fromEntries(workspace.criteria.map((criterion) => [criterion.id, { score: 5, confidence: 40, evidence: '' }]));
+        workspace.scores[newId] = neutralCells(workspace.criteria);
       }, { actor: 'human' });
     }
     closeDialog('option-dialog');
@@ -1149,12 +915,8 @@ function bindEvents() {
     const option = optionById(id);
     if (!option || stateful.workspace.options.length <= 1) return toast('A workspace must keep at least one option.', 'error');
     if (!confirm(`Remove “${option.name}”? This can be undone.`)) return;
-    mutate(`Human removed option “${option.name}”.`, (workspace) => {
-      workspace.options = workspace.options.filter((item) => item.id !== id);
-      delete workspace.scores[id];
-      workspace.scenarios.forEach((scenario) => delete scenario.scoreOverrides?.[id]);
-      if (workspace.stagedRecommendation?.optionId === id) workspace.stagedRecommendation = null;
-    }, { actor: 'human' });
+    const snapshot = snapshotOption(stateful.workspace, id);
+    mutate(describeRemoval('Human', snapshot), (workspace) => removeOption(workspace, id), { actor: 'human' });
     closeDialog('option-dialog');
   });
 
@@ -1162,20 +924,16 @@ function bindEvents() {
     const data = new FormData(event.currentTarget);
     const optionId = String(data.get('optionId'));
     const criterionId = String(data.get('criterionId'));
-    const cell = {
-      score: Number(data.get('score')),
-      confidence: Number(data.get('confidence')),
-      evidence: String(data.get('evidence')).trim(),
-    };
     const scenarioId = stateful.workspace.activeScenarioId || 'base';
     mutate(`Human scored ${optionById(optionId)?.name} on ${criterionById(criterionId)?.name}.`, (workspace) => {
-      if (scenarioId === 'base') workspace.scores[optionId][criterionId] = cell;
-      else {
-        const scenario = workspace.scenarios.find((item) => item.id === scenarioId);
-        scenario.scoreOverrides ??= {};
-        scenario.scoreOverrides[optionId] ??= {};
-        scenario.scoreOverrides[optionId][criterionId] = cell;
-      }
+      setScoreCell(workspace, {
+        optionId,
+        criterionId,
+        score: Number(data.get('score')),
+        confidence: Number(data.get('confidence')),
+        evidence: String(data.get('evidence')).trim(),
+        scenarioId,
+      });
     }, { actor: 'human' });
     closeDialog('score-dialog');
   });
@@ -1272,10 +1030,18 @@ function boot() {
   bindEvents();
   render();
   refreshTools();
+  if (restored.warning) {
+    showStorageNotice(`${restored.warning.message} Your next change overwrites the unreadable copy. Use “Import” to restore a JSON export if you have one.`);
+  }
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('./sw.js').catch((error) => console.warn('Service worker registration failed.', error));
   }
-  addEventListener('pagehide', uninstallWebMCP, { once: true });
+  // Unregister when the page is hidden (including bfcache entry) and register
+  // again when it is restored from the back/forward cache.
+  addEventListener('pagehide', uninstallWebMCP);
+  addEventListener('pageshow', (event) => {
+    if (event.persisted) refreshTools();
+  });
 }
 
 boot();
